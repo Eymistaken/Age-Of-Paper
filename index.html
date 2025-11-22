@@ -94,7 +94,13 @@
 
             useEffect(() => {
                 const unsub = onAuthStateChanged(auth, (u) => {
-                    if (u) setUser(u);
+                    if (u) {
+                        setUser(u);
+                        // --- ID'Yİ KONSOLA YAZDIRMA KODU ---
+                        console.log("%c SENİN ID NUMARAN AŞAĞIDA:", "color: yellow; font-size: 20px; font-weight: bold;");
+                        console.log("%c" + u.uid, "color: lime; font-size: 24px; font-weight: bold; background: #333; padding: 5px;");
+                        // -----------------------------------
+                    }
                     else signInAnonymously(auth).catch(e => setError("Giriş Hatası: " + e.message));
                 });
                 return () => unsub();
@@ -200,11 +206,9 @@
                     </div>
                 );
             }
-            // FIX: resetApp prop'u GameRoom'a aktarıldı
             return <GameRoom user={user} roomCode={roomCode} roomData={roomData} leaveRoom={leaveRoom} resetApp={resetApp} />;
         }
 
-        // FIX: resetApp prop'u GameRoom fonksiyonunda karşılandı
         function GameRoom({ user, roomCode, roomData, leaveRoom, resetApp }) {
             const [scale, setScale] = useState(1);
             const [pos, setPos] = useState({ x: 0, y: 0 });
