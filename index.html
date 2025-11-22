@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Age of Paper - Online</title>
     
-    <!-- Gerekli Kütüphaneler (CDN) -->
+    <!-- React ve Gerekli Kütüphaneler -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -13,7 +13,6 @@
     
     <style>
         body { background-color: #2c3e50; color: white; margin: 0; overflow: hidden; }
-        /* Scrollbar Güzelleştirme */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #2c3e50; }
         ::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
@@ -24,8 +23,6 @@
         .default-land { fill: #ececec; stroke: #555; stroke-width: 0.5px; transition: fill 0.2s; cursor: pointer; }
         .default-land:hover { fill: #bdc3c7; }
         .selected { stroke: #f1c40f !important; stroke-width: 3px; }
-
-        /* Animasyonlar */
         @keyframes spin { to { transform: rotate(360deg); } }
         .animate-spin { animation: spin 1s linear infinite; }
     </style>
@@ -33,33 +30,30 @@
 <body>
     <div id="root"></div>
 
-    <!-- DİKKAT: data-type="module" eklendi -->
     <script type="text/babel" data-type="module">
-        // --- FIREBASE İMPORTLARI (CDN Versiyonu - Modül Olarak) ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, arrayUnion, deleteField } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
         // ==================================================================
-        // DİKKAT ALİ: BURAYI KENDİ FIREBASE BİLGİLERİNLE DOLDURMALISIN!
-        // Firebase konsolundan aldığın 'const firebaseConfig = { ... }' kısmını buraya yapıştır.
+        // SENİN PROJE AYARLARIN (Eymistaken)
         // ==================================================================
         const firebaseConfig = {
-            apiKey: "BURAYA_API_KEY_GELECEK",
-            authDomain: "BURAYA_AUTH_DOMAIN_GELECEK",
-            projectId: "BURAYA_PROJECT_ID_GELECEK",
-            storageBucket: "BURAYA_STORAGE_BUCKET_GELECEK",
-            messagingSenderId: "BURAYA_SENDER_ID",
-            appId: "BURAYA_APP_ID"
+          apiKey: "AIzaSyC3_3GnZIv78PEVsLGjSv_k31ai8fZjmL8",
+          authDomain: "eymistaken.firebaseapp.com",
+          projectId: "eymistaken",
+          storageBucket: "eymistaken.firebasestorage.app",
+          messagingSenderId: "677072278270",
+          appId: "1:677072278270:web:6bfbd792b01eb1dc6e0baf",
+          measurementId: "G-PJECZ871LP"
         };
-        // ==================================================================
 
         // Firebase Başlat
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
 
-        // --- BASİT IKON BİLEŞENLERİ (Lucide Yerine) ---
+        // --- İKONLAR ---
         const Icon = ({ children, size = 16, className = "" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
         );
@@ -71,10 +65,13 @@
         const MessageSquare = ({ size, className }) => <Icon size={size} className={className}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></Icon>;
         const Send = ({ size }) => <Icon size={size}><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></Icon>;
 
-        // --- SABİTLER ---
         const PLAYER_COLORS = ['#3498db', '#e74c3c', '#f1c40f', '#9b59b6', '#2ecc71', '#1abc9c', '#d35400'];
         
-        // Türkçe Veriler (ID'ye göre)
+        const nameMapping = {
+            "Turkey": "TR", "United States": "US", "USA": "US", "Russia": "RU", "Russian Federation": "RU", "China": "CN",
+            "Germany": "DE", "France": "FR", "United Kingdom": "GB", "Great Britain": "GB", "UK": "GB",
+            "Italy": "IT", "Spain": "ES", "Portugal": "PT", "Brazil": "BR", "Brasil": "BR", "Azerbaijan": "AZ", "Greece": "GR", "Japan": "JP"
+        };
         const definedCountries = {
             "TR": { name: "Türkiye", cost: 60000, income: 5000 },
             "US": { name: "ABD", cost: 150000, income: 12000 },
@@ -91,17 +88,9 @@
             "GR": { name: "Yunanistan", cost: 40000, income: 3000 },
             "JP": { name: "Japonya", cost: 80000, income: 7000 }
         };
-        
-        // İngilizce İsimleri Türkçe'ye Eşleme Sözlüğü
-        const nameMapping = { 
-            "Turkey": "TR", "United States": "US", "USA": "US", "Russia": "RU", "Russian Federation": "RU", "China": "CN", 
-            "Germany": "DE", "France": "FR", "United Kingdom": "GB", "Great Britain": "GB", "UK": "GB", 
-            "Italy": "IT", "Spain": "ES", "Portugal": "PT", "Brazil": "BR", "Brasil": "BR", "Azerbaijan": "AZ", "Greece": "GR", "Japan": "JP" 
-        };
 
         const { useState, useEffect, useRef } = React;
 
-        // --- ANA BİLEŞEN ---
         function App() {
             const [user, setUser] = useState(null);
             const [gameState, setGameState] = useState('login');
@@ -110,20 +99,29 @@
             const [roomData, setRoomData] = useState(null);
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState('');
+            const [connStatus, setConnStatus] = useState('Bağlanıyor...');
 
             useEffect(() => {
                 const unsub = onAuthStateChanged(auth, (u) => {
-                    if (u) setUser(u);
-                    else signInAnonymously(auth).catch(e => setError(e.message));
+                    if (u) {
+                        setUser(u);
+                    } else {
+                        setConnStatus('Giriş yapılıyor...');
+                        signInAnonymously(auth)
+                            .catch(e => {
+                                console.error(e);
+                                setConnStatus('Bağlantı Hatası: ' + e.message);
+                            });
+                    }
                 });
                 return () => unsub();
             }, []);
 
-            // Oda Dinleme
             useEffect(() => {
                 if (!roomCode || !user) return;
+                
+                // Oda verisi dinleme
                 const roomRef = doc(db, 'rooms', roomCode);
-
                 const unsub = onSnapshot(roomRef, (docSnap) => {
                     if (docSnap.exists()) {
                         const data = docSnap.data();
@@ -132,13 +130,15 @@
                             setGameState('game');
                             localStorage.setItem('aop_room', roomCode);
                         } else if (gameState === 'game') {
-                            leaveRoom(true); // Atılmışız
+                            leaveRoom(true); // Atıldın veya silindi
                         }
                     } else if (gameState === 'game') {
-                        leaveRoom(true); // Oda silinmiş
+                        leaveRoom(true); // Oda yok
                     }
-                }, (err) => console.error("Oda hatası:", err));
-
+                }, (err) => {
+                    console.error("Oda hatası:", err);
+                    setError("Oda verisi okunamadı.");
+                });
                 return () => unsub();
             }, [roomCode, user, gameState]);
 
@@ -147,18 +147,13 @@
                 setLoading(true);
                 const code = Math.random().toString(36).substring(2, 6).toUpperCase();
                 const roomRef = doc(db, 'rooms', code);
-
+                
                 const initialData = {
-                    hostId: user.uid,
-                    status: 'lobby',
-                    mapSvg: '',
-                    players: {
-                        [user.uid]: { id: user.uid, name: nickname, color: PLAYER_COLORS[0], money: 50000, soldiers: 0 }
-                    },
-                    chat: [],
-                    gameData: {}
+                    hostId: user.uid, status: 'lobby', mapSvg: '',
+                    players: { [user.uid]: { id: user.uid, name: nickname, color: PLAYER_COLORS[0], money: 50000, soldiers: 0 } },
+                    chat: [], gameData: {}
                 };
-
+                
                 try {
                     await setDoc(roomRef, initialData);
                     setRoomCode(code);
@@ -201,7 +196,13 @@
                 setRoomCode(''); setRoomData(null); setGameState('login'); localStorage.removeItem('aop_room');
             };
 
-            if (!user) return <div className="flex h-screen items-center justify-center text-white">Bağlanıyor...</div>;
+            if (!user) return (
+                <div className="flex flex-col h-screen items-center justify-center text-white bg-gray-900">
+                    <Loader size={48} className="animate-spin mb-4 text-yellow-500"/>
+                    <p className="text-lg">{connStatus}</p>
+                    <p className="text-sm text-gray-500 mt-2">Veritabanına erişiliyor...</p>
+                </div>
+            );
 
             if (gameState === 'login') {
                 return (
@@ -226,11 +227,9 @@
                     </div>
                 );
             }
-
             return <GameRoom user={user} roomCode={roomCode} roomData={roomData} leaveRoom={() => leaveRoom()} />;
         }
 
-        // --- OYUN ODASI ---
         function GameRoom({ user, roomCode, roomData, leaveRoom }) {
             const [scale, setScale] = useState(1);
             const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -244,15 +243,23 @@
             const isHost = roomData.hostId === user.uid;
             const svgRef = useRef(null);
 
+            // ZOOM FIX BURADA
             const handleWheel = (e) => {
                 const factor = e.deltaY > 0 ? 0.9 : 1.1;
                 const newScale = Math.max(0.5, Math.min(20, scale * factor));
                 const rect = e.currentTarget.getBoundingClientRect();
-                const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-                const wx = (mx - pos.x) / scale, wy = (my - pos.y) / scale;
-                setPos({ x: mx - wx * newScale, y: my - wy * newScale });
+                
+                // HATA BURADAYDI: mx yerine mouseX kullandım
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                const worldX = (mouseX - pos.x) / scale;
+                const worldY = (mouseY - pos.y) / scale;
+                
+                setPos({ x: mouseX - worldX * newScale, y: mouseY - worldY * newScale });
                 setScale(newScale);
             };
+            
             const startDrag = (e) => { if(e.button===0){ setIsDragging(true); setDragStart({x: e.clientX - pos.x, y: e.clientY - pos.y}); }};
             const doDrag = (e) => { if(isDragging) setPos({x: e.clientX - dragStart.x, y: e.clientY - dragStart.y}); };
             const stopDrag = () => setIsDragging(false);
@@ -306,7 +313,10 @@
             let regionInfo = { name: selectedId, status: 'Sahipsiz' };
             if(selectedId) {
                 let rawName = document.getElementById(selectedId)?.getAttribute('name') || selectedId;
-                if(rawName) rawName = rawName.replace(/default-land/g, "").replace(/_/g, " ").trim();
+                if(rawName && typeof rawName === 'string') {
+                    rawName = rawName.replace(/default-land/g, "").replace(/_/g, " ").trim();
+                }
+                
                 if(definedCountries[selectedId]) rawName = definedCountries[selectedId].name;
                 else if(nameMapping[rawName]) {
                      const mapped = nameMapping[rawName];
