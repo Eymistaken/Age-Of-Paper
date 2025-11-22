@@ -17,7 +17,7 @@
         ::-webkit-scrollbar-track { background: #2d3748; }
         ::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: #718096; }
-        .default-land { fill: #4a5568; stroke: #2d3748; stroke-width: 1px; transition: all 0.2s; cursor: pointer; }
+        .default-land { fill: #4a5568; stroke: #2d3748; stroke-width: 1px; transition: all 0.2s; cursor: pointer; vector-effect: non-scaling-stroke; }
         .default-land:hover { fill: #718096; filter: brightness(1.1); }
         .selected-land { stroke: #ecc94b !important; stroke-width: 3px !important; filter: drop-shadow(0 0 5px rgba(236, 201, 75, 0.5)); }
         @keyframes pulse-border { 0% { border-color: #ecc94b; box-shadow: 0 0 0 0 rgba(236, 201, 75, 0.7); } 70% { border-color: #b7791f; box-shadow: 0 0 0 10px rgba(236, 201, 75, 0); } 100% { border-color: #ecc94b; box-shadow: 0 0 0 0 rgba(236, 201, 75, 0); } }
@@ -69,6 +69,21 @@
         };
 
         const { useState, useEffect, useRef } = React;
+
+        // --- Kopyalama Butonu Bileşeni (YENİ) ---
+        const CopyBtn = ({ code }) => {
+            const [copied, setCopied] = useState(false);
+            const handleCopy = () => {
+                navigator.clipboard.writeText(code);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            };
+            return (
+                <button onClick={handleCopy} className="text-gray-400 hover:text-white transition flex items-center gap-2" title="Kodu Kopyala">
+                    {copied ? <span className="text-green-500 font-bold text-xs animate-pulse">KOPYALANDI!</span> : <Icon p={Icons.Copy} s={16}/>}
+                </button>
+            );
+        };
 
         function App() {
             const [user, setUser] = useState(null);
@@ -207,26 +222,16 @@
             const selectedEl = selectedId ? document.getElementById(selectedId) : null;
             const regionName = selectedEl ? selectedEl.getAttribute('data-name') : "Seçilmedi";
 
-            // MERKEZİ ZOOM (CENTER ZOOM)
             const handleWheel = (e) => {
                 const factor = e.deltaY > 0 ? 0.9 : 1.1;
                 const newScale = Math.max(0.5, Math.min(10, scale * factor));
-                
-                // Container boyutları
                 const rect = e.currentTarget.getBoundingClientRect();
-                
-                // Ekranın tam ortası (Zoom Merkezi)
                 const cx = rect.width / 2;
                 const cy = rect.height / 2;
-                
-                // Merkezin dünya koordinatlarındaki karşılığı (Bu nokta sabit kalmalı)
                 const wx = (cx - pos.x) / scale;
                 const wy = (cy - pos.y) / scale;
-                
-                // Yeni scale ile merkezin yeni konumu
                 const nx = cx - wx * newScale;
                 const ny = cy - wy * newScale;
-
                 setPos({x: nx, y: ny});
                 setScale(newScale);
             };
@@ -298,7 +303,6 @@
                             id = `land_${idx}`; 
                             p.setAttribute('id', id); 
                         }
-                        
                         let displayName = p.getAttribute('data-original-name');
                         if (!displayName) {
                             const rawName = p.getAttribute('name') || p.getAttribute('class') || id;
@@ -306,14 +310,12 @@
                             p.setAttribute('data-original-name', displayName);
                         }
                         p.setAttribute('data-name', displayName);
-
                         const region = roomData.gameData[id];
                         p.setAttribute('class', 'default-land');
                         p.style.fill = region ? region.color : '#4a5568';
                         p.style.stroke = '#2d3748';
                         if(id === selectedId) { p.classList.add('selected-land'); } 
                         else { p.classList.remove('selected-land'); }
-                        
                         p.onclick = (e) => { e.stopPropagation(); setSelectedId(id); };
                     });
                 }
@@ -325,9 +327,7 @@
                         <div className="absolute top-4 left-4 bg-gray-800 px-4 py-2 rounded-lg flex items-center gap-3 border border-gray-700 shadow-lg">
                             <span className="text-gray-400 text-sm">ODA:</span>
                             <span className="text-yellow-500 font-bold text-xl tracking-widest">{roomCode}</span>
-                            <button onClick={() => navigator.clipboard.writeText(roomCode)} className="text-gray-400 hover:text-white transition" title="Kodu Kopyala">
-                                <Icon p={Icons.Copy} s={16}/>
-                            </button>
+                            <CopyBtn code={roomCode} />
                         </div>
 
                         <button onClick={leaveRoom} className="absolute top-4 right-4 text-red-500 hover:text-red-400"><Icon p={Icons.LogOut} /></button>
@@ -400,11 +400,22 @@
                         onMouseLeave={() => setDragging(false)}
                         onWheel={handleWheel}
                     >
-                        <div style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`, transformOrigin: '0 0', transition: dragging ? 'none' : 'transform 0.1s' }} className="w-full h-full absolute top-0 left-0">
+                        <div 
+                            style={{ 
+                                transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`, 
+                                transformOrigin: '0 0', 
+                                transition: dragging ? 'none' : 'transform 0.1s',
+                                willChange: 'transform'
+                            }} 
+                            className="w-full h-full absolute top-0 left-0"
+                        >
                             {roomData.mapSvg && <div ref={svgRef} dangerouslySetInnerHTML={{__html: roomData.mapSvg}} className="w-full h-full"/>}
                         </div>
                         <div className="absolute top-4 left-1/2 transform -translate-x-1/2 glass-panel px-6 py-2 rounded-full flex items-center gap-6 shadow-lg z-10">
-                            <div className="flex items-center gap-2 font-bold text-xl"><span className="text-yellow-500">{roomCode}</span><button onClick={() => navigator.clipboard.writeText(roomCode)} className="text-gray-400 hover:text-white"><Icon p={Icons.Copy} s={14}/></button></div>
+                            <div className="flex items-center gap-2 font-bold text-xl">
+                                <span className="text-yellow-500">{roomCode}</span>
+                                <CopyBtn code={roomCode} />
+                            </div>
                             <div className="w-px h-6 bg-gray-600"></div>
                             <div className="text-sm text-gray-300">Tur: <span className="text-white font-bold">{roomData.turnIndex + 1}</span></div>
                             <button onClick={leaveRoom} className="text-red-400 hover:text-red-300"><Icon p={Icons.LogOut}/></button>
