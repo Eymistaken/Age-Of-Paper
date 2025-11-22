@@ -50,7 +50,7 @@
         const COLORS = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B'];
         const MAX_PLAYERS = 4;
         const STARTING_MONEY = 50000;
-        // REGION_COST kaldırıldı, artık dinamik hesaplanıyor.
+        const REGION_COST = 10000;
         const TURN_INCOME = 5000;
 
         const Icon = ({p, s=20, c=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={c}>{p}</svg>;
@@ -200,18 +200,21 @@
                     </div>
                 );
             }
+            // FIX: resetApp prop'u GameRoom'a aktarıldı
             return <GameRoom user={user} roomCode={roomCode} roomData={roomData} leaveRoom={leaveRoom} resetApp={resetApp} />;
         }
 
+        // FIX: resetApp prop'u GameRoom fonksiyonunda karşılandı
         function GameRoom({ user, roomCode, roomData, leaveRoom, resetApp }) {
             const [scale, setScale] = useState(1);
             const [pos, setPos] = useState({ x: 0, y: 0 });
             const [dragging, setDragging] = useState(false);
             const [dragStart, setDragStart] = useState({x:0, y:0});
             const [selectedId, setSelectedId] = useState(null);
-            const [selectedCost, setSelectedCost] = useState(0); // DİNAMİK FİYAT STATE'İ
+            const [selectedCost, setSelectedCost] = useState(0);
             const [msg, setMsg] = useState('');
             const svgRef = useRef(null);
+            const chatEndRef = useRef(null);
 
             const isHost = roomData.hostId === user.uid;
             const players = Object.values(roomData.players);
@@ -222,7 +225,10 @@
             const selectedEl = selectedId ? document.getElementById(selectedId) : null;
             const regionName = selectedEl ? selectedEl.getAttribute('data-name') : "Seçilmedi";
 
-            // FİYAT HESAPLAMA ETKİSİ (ALGOLAR BURADA)
+            useEffect(() => {
+                chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            }, [roomData.chat]);
+
             useEffect(() => {
                 if(!selectedId) {
                     setSelectedCost(0);
@@ -232,19 +238,15 @@
                 if(el) {
                     try {
                         const bbox = el.getBBox();
-                        // ALGORİTMA: (Genişlik * Yükseklik) / 15 + 4000 (Baz Fiyat)
-                        // Büyük ülkeler aşırı pahalı olmasın diye 15'e böldük.
                         let rawPrice = (bbox.width * bbox.height) / 15 + 4000;
-                        // Fiyatı 100'ün katlarına yuvarla (daha temiz görünür)
                         const finalPrice = Math.ceil(rawPrice / 100) * 100;
                         setSelectedCost(finalPrice);
                     } catch (e) {
-                        setSelectedCost(10000); // Hata olursa varsayılan
+                        setSelectedCost(10000);
                     }
                 }
             }, [selectedId]);
 
-            // CURSOR-FOCUSED ZOOM
             const handleWheel = (e) => {
                 const factor = e.deltaY > 0 ? 0.9 : 1.1;
                 const newScale = Math.max(0.5, Math.min(20, scale * factor));
@@ -294,17 +296,13 @@
 
             const buyRegion = async () => {
                 if(!isMyTurn || !selectedId) return;
-                
                 if(roomData.gameData[selectedId]?.owner) return alert("Bu bölge zaten birine ait!");
-                
-                // DİNAMİK FİYAT KONTROLÜ
                 if(me.money < selectedCost) return alert(`Yetersiz Bakiye! (Gereken: ${selectedCost})`);
-                
                 if (!checkAdjacency(selectedId)) return alert("Sadece sınır komşusu olan bölgeleri satın alabilirsin! (İlk bölge hariç)");
 
                 await updateDoc(doc(db, 'rooms', roomCode), {
                     [`gameData.${selectedId}`]: { owner: user.uid, color: me.color },
-                    [`players.${user.uid}.money`]: increment(-selectedCost), // DİNAMİK FİYAT DÜŞÜLÜYOR
+                    [`players.${user.uid}.money`]: increment(-selectedCost),
                     turnIndex: (roomData.turnIndex + 1) % roomData.turnOrder.length
                 });
                 setSelectedId(null);
@@ -419,6 +417,8 @@
                                 {roomData.chat?.map((m, i) => (
                                     <div key={i} className="text-sm"><span style={{color: m.c}} className="font-bold text-xs block">{m.s}</span><span className="text-gray-300 bg-gray-700/50 px-2 py-1 rounded inline-block max-w-full break-words">{m.t}</span></div>
                                 ))}
+                                {/* OTOMATİK SCROLL İÇİN GÖRÜNMEZ DİV */}
+                                <div ref={chatEndRef} />
                             </div>
                             <form onSubmit={sendMessage} className="p-2 bg-gray-800 border-t border-gray-700 flex gap-2">
                                 <input className="flex-1 bg-gray-900 rounded px-2 py-1 text-sm text-white border border-gray-700 outline-none focus:border-gray-500" placeholder="Mesaj..." value={msg} onChange={e=>setMsg(e.target.value)}/>
