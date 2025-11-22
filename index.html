@@ -92,7 +92,6 @@
                 const unsub = onSnapshot(doc(db, 'rooms', roomCode), (docSnap) => {
                     if (docSnap.exists()) {
                         const data = docSnap.data();
-                        // Eğer oyuncu listesinde yoksak atılmışızdır
                         if (!data.players[user.uid]) {
                             localStorage.removeItem('aop_room');
                             setRoomCode('');
@@ -103,18 +102,17 @@
                             localStorage.setItem('aop_room', roomCode);
                         }
                     } else {
-                        // Oda silinmiş
                         localStorage.removeItem('aop_room');
                         setRoomCode('');
                         setRoomData(null);
                     }
                     setLoading(false);
                 }, (err) => {
-                    console.error("Dinleme hatası:", err);
+                    console.error(err);
                     setLoading(false);
                     localStorage.removeItem('aop_room');
                     setRoomCode('');
-                    setError("Bağlantı koptu: " + err.message);
+                    setError("Bağlantı koptu.");
                 });
 
                 return () => unsub();
@@ -130,58 +128,31 @@
                 setLoading(true);
                 setError("");
                 const code = Math.random().toString(36).substring(2, 6).toUpperCase();
-                
-                const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error("Sunucu yanıt vermedi.")), 10000)
-                );
-
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Sunucu yanıt vermedi.")), 10000));
                 const writePromise = setDoc(doc(db, 'rooms', code), {
-                    hostId: user.uid,
-                    status: 'lobby',
-                    mapSvg: '',
-                    turnIndex: 0,
-                    turnOrder: [],
-                    players: {
-                        [user.uid]: { id: user.uid, name: nickname, color: COLORS[0], money: STARTING_MONEY, ready: true }
-                    },
-                    chat: [],
-                    gameData: {}
+                    hostId: user.uid, status: 'lobby', mapSvg: '', turnIndex: 0, turnOrder: [],
+                    players: { [user.uid]: { id: user.uid, name: nickname, color: COLORS[0], money: STARTING_MONEY, ready: true } },
+                    chat: [], gameData: {}
                 });
-
                 try {
                     await Promise.race([writePromise, timeoutPromise]);
                     localStorage.setItem('aop_nickname', nickname);
                     setRoomCode(code); 
-                } catch (e) { 
-                    setError(e.message); 
-                    setLoading(false); 
-                }
+                } catch (e) { setError(e.message); setLoading(false); }
             };
 
             const joinRoom = async (code) => {
-                if (!nickname || !code) return setError("İsim ve Kod gerekli.");
+                if (!nickname || !code) return setError("Kod gerekli.");
                 setLoading(true);
                 const roomRef = doc(db, 'rooms', code);
-                
                 try {
                     const snap = await getDoc(roomRef);
                     if (!snap.exists()) throw new Error("Oda bulunamadı.");
-                    
                     const data = snap.data();
-                    if (Object.keys(data.players).length >= MAX_PLAYERS) throw new Error("Oda dolu (Max 4).");
-                    if (data.status === 'playing') throw new Error("Oyun çoktan başlamış.");
-
+                    if (Object.keys(data.players).length >= MAX_PLAYERS) throw new Error("Oda dolu.");
+                    if (data.status === 'playing') throw new Error("Oyun başlamış.");
                     const playerIndex = Object.keys(data.players).length;
-                    
-                    await updateDoc(roomRef, {
-                        [`players.${user.uid}`]: { 
-                            id: user.uid, 
-                            name: nickname, 
-                            color: COLORS[playerIndex], 
-                            money: STARTING_MONEY,
-                            ready: true 
-                        }
-                    });
+                    await updateDoc(roomRef, { [`players.${user.uid}`]: { id: user.uid, name: nickname, color: COLORS[playerIndex], money: STARTING_MONEY, ready: true } });
                     localStorage.setItem('aop_nickname', nickname);
                     setRoomCode(code);
                 } catch (e) { setError(e.message); setLoading(false); }
@@ -189,64 +160,32 @@
 
             const leaveRoom = async () => {
                 if (roomCode && user) {
-                    try {
-                        const roomRef = doc(db, 'rooms', roomCode);
-                        await updateDoc(roomRef, { [`players.${user.uid}`]: deleteField() });
-                    } catch(e) { console.log("Çıkış hatası", e); }
+                    try { await updateDoc(doc(db, 'rooms', roomCode), { [`players.${user.uid}`]: deleteField() }); } catch(e) {}
                 }
-                setRoomCode('');
-                setRoomData(null);
-                localStorage.removeItem('aop_room');
+                setRoomCode(''); setRoomData(null); localStorage.removeItem('aop_room');
             };
 
-            if (!user) return (
-                <div className="h-screen flex flex-col items-center justify-center text-yellow-500 font-bold animate-pulse bg-gray-900">
-                    <div className="mb-4">Bağlanıyor...</div>
-                    <button onClick={resetApp} className="text-xs text-gray-500 hover:text-red-400 border border-gray-700 px-2 py-1 rounded">Takılı kaldıysa tıkla (Sıfırla)</button>
-                </div>
-            );
+            if (!user) return <div className="h-screen flex flex-col items-center justify-center text-yellow-500 bg-gray-900"><div className="mb-4">Bağlanıyor...</div><button onClick={resetApp} className="text-xs border border-gray-700 px-2 py-1 rounded text-gray-500">Sıfırla</button></div>;
 
             if (!roomData) {
                 return (
                     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900 p-4 relative overflow-hidden">
-                        <button onClick={resetApp} className="absolute top-4 left-4 text-xs text-gray-600 hover:text-red-400 flex items-center gap-1 z-50">
-                            <Icon p={Icons.Trash} s={12}/> Önbelleği Temizle
-                        </button>
-
-                        <div className="absolute w-96 h-96 bg-yellow-500/10 rounded-full blur-3xl -top-20 -left-20"></div>
-                        <div className="absolute w-96 h-96 bg-blue-500/10 rounded-full blur-3xl -bottom-20 -right-20"></div>
-
+                        <button onClick={resetApp} className="absolute top-4 left-4 text-xs text-gray-600 hover:text-red-400 flex items-center gap-1 z-50"><Icon p={Icons.Trash} s={12}/> Sıfırla</button>
                         <div className="z-10 w-full max-w-md glass-panel p-8 rounded-2xl shadow-2xl border border-gray-700">
-                            <h1 className="text-5xl font-bold text-center mb-8 bg-gradient-to-r from-yellow-400 to-yellow-600 bg-clip-text text-transparent" style={{fontFamily: 'Georgia'}}>Age of Paper</h1>
-                            
-                            {error && <div className="bg-red-500/20 text-red-200 p-3 rounded mb-4 text-center text-sm border border-red-500/30">{error}</div>}
-                            
+                            <h1 className="text-5xl font-bold text-center mb-8 text-yellow-500" style={{fontFamily: 'Georgia'}}>Age of Paper</h1>
+                            {error && <div className="bg-red-500/20 text-red-200 p-3 rounded mb-4 text-sm">{error}</div>}
                             <div className="space-y-4">
-                                <div>
-                                    <label className="block text-gray-400 text-sm font-bold mb-2">Komutan Adı</label>
-                                    <input value={nickname} onChange={e=>setNickname(e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded-lg p-3 focus:border-yellow-500 outline-none text-white transition" placeholder="İsminizi girin..."/>
-                                </div>
-                                
-                                <button onClick={createRoom} disabled={loading} className="w-full bg-gradient-to-r from-yellow-600 to-yellow-700 hover:from-yellow-500 hover:to-yellow-600 text-white font-bold py-3 rounded-lg shadow-lg transform transition hover:scale-[1.02] active:scale-95 flex justify-center items-center gap-2">
-                                    {loading ? "İşleniyor..." : <><Icon p={Icons.Map} s={18}/> Yeni Oda Kur</>}
-                                </button>
-                                
-                                <div className="relative flex items-center py-2">
-                                    <div className="flex-grow border-t border-gray-700"></div>
-                                    <span className="flex-shrink-0 mx-4 text-gray-500 text-xs">VEYA</span>
-                                    <div className="flex-grow border-t border-gray-700"></div>
-                                </div>
-
+                                <input value={nickname} onChange={e=>setNickname(e.target.value)} className="w-full bg-gray-800 border border-gray-600 rounded-lg p-3 text-white outline-none" placeholder="Komutan Adı"/>
+                                <button onClick={createRoom} disabled={loading} className="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 rounded-lg">{loading ? "..." : "Yeni Oda Kur"}</button>
                                 <div className="flex gap-2">
-                                    <input id="codeIn" className="flex-1 bg-gray-800 border border-gray-600 rounded-lg p-3 text-center uppercase tracking-widest outline-none focus:border-blue-500" placeholder="ODA KODU" maxLength={4}/>
-                                    <button onClick={() => joinRoom(document.getElementById('codeIn').value.toUpperCase())} disabled={loading} className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 rounded-lg transition">KATIL</button>
+                                    <input id="codeIn" className="flex-1 bg-gray-800 border border-gray-600 rounded-lg p-3 text-center uppercase tracking-widest text-white outline-none" placeholder="KOD" maxLength={4}/>
+                                    <button onClick={() => joinRoom(document.getElementById('codeIn').value.toUpperCase())} disabled={loading} className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 rounded-lg">KATIL</button>
                                 </div>
                             </div>
                         </div>
                     </div>
                 );
             }
-
             return <GameRoom user={user} roomCode={roomCode} roomData={roomData} leaveRoom={leaveRoom} />;
         }
 
@@ -257,17 +196,17 @@
             const [dragStart, setDragStart] = useState({x:0, y:0});
             const [selectedId, setSelectedId] = useState(null);
             const [msg, setMsg] = useState('');
-
             const svgRef = useRef(null);
+
             const isHost = roomData.hostId === user.uid;
             const players = Object.values(roomData.players);
             const me = roomData.players[user.uid];
-            
             const currentPlayerId = roomData.status === 'playing' ? roomData.turnOrder[roomData.turnIndex] : null;
             const isMyTurn = currentPlayerId === user.uid;
-
+            
+            // Seçili bölge adı
             const selectedEl = selectedId ? document.getElementById(selectedId) : null;
-            const regionName = selectedEl ? selectedEl.getAttribute('data-name') : "Bilinmiyor";
+            const regionName = selectedEl ? selectedEl.getAttribute('data-name') : "Seçilmedi";
 
             const handleWheel = (e) => {
                 const factor = e.deltaY > 0 ? 0.9 : 1.1;
@@ -285,19 +224,13 @@
             };
 
             const startGame = async () => {
-                if(players.length < 1) return;
                 const shuffled = players.map(p => p.id).sort(() => Math.random() - 0.5);
-                await updateDoc(doc(db, 'rooms', roomCode), {
-                    status: 'playing',
-                    turnOrder: shuffled,
-                    turnIndex: 0
-                });
+                await updateDoc(doc(db, 'rooms', roomCode), { status: 'playing', turnOrder: shuffled, turnIndex: 0 });
             };
 
             const buyRegion = async () => {
                 if(!isMyTurn || !selectedId) return;
                 if(me.money < REGION_COST) return alert("Yetersiz Bakiye!");
-
                 await updateDoc(doc(db, 'rooms', roomCode), {
                     [`gameData.${selectedId}`]: { owner: user.uid, color: me.color },
                     [`players.${user.uid}.money`]: increment(-REGION_COST),
@@ -317,32 +250,40 @@
             const sendMessage = async (e) => {
                 e.preventDefault();
                 if(!msg.trim()) return;
-                await updateDoc(doc(db, 'rooms', roomCode), {
-                    chat: arrayUnion({ s: me.name, c: me.color, t: msg })
-                });
+                await updateDoc(doc(db, 'rooms', roomCode), { chat: arrayUnion({ s: me.name, c: me.color, t: msg }) });
                 setMsg('');
             };
 
+            // SVG İŞLEME (SENKRONİZASYON DÜZELTİLDİ)
             useEffect(() => {
                 if(svgRef.current && roomData.mapSvg) {
                     const paths = svgRef.current.querySelectorAll('path, polygon, circle');
-                    paths.forEach(p => {
+                    paths.forEach((p, idx) => {
+                        // ÖNEMLİ: Random yerine INDEX kullanıyoruz. Böylece herkes aynı parçaya aynı ID'yi veriyor.
                         let id = p.getAttribute('id');
                         if(!id) { 
-                            id = 'gen_'+Math.random().toString(36).substr(2,5); 
+                            id = `land_${idx}`; // Fix: Deterministic ID
                             p.setAttribute('id', id); 
                         }
                         
-                        let rawName = p.getAttribute('name') || p.getAttribute('class') || id;
-                        let displayName = rawName.replace(/_/g, ' ');
-                        p.setAttribute('data-name', displayName);
+                        // İsim kurtarma (Class silinmeden önce al)
+                        if(!p.getAttribute('data-name')) {
+                            const rawName = p.getAttribute('name') || p.getAttribute('class') || id;
+                            // Gereksiz karakterleri temizle
+                            const cleanName = rawName.replace(/default-land/g, '').replace(/_/g, ' ').trim() || "Bölge " + idx;
+                            p.setAttribute('data-name', cleanName);
+                        }
 
                         const region = roomData.gameData[id];
-                        p.setAttribute('class', 'default-land');
+                        
+                        // Sınıf ekleme (Mevcut sınıfları silmeden)
+                        if(!p.classList.contains('default-land')) p.classList.add('default-land');
+                        
                         p.style.fill = region ? region.color : '#4a5568';
-                        p.style.stroke = region ? '#2d3748' : '#2d3748';
-                        if(id === selectedId) { p.classList.add('selected-land'); } 
-                        else { p.classList.remove('selected-land'); }
+                        p.style.stroke = '#2d3748';
+                        
+                        if(id === selectedId) p.classList.add('selected-land'); 
+                        else p.classList.remove('selected-land');
                         
                         p.onclick = (e) => { e.stopPropagation(); setSelectedId(id); };
                     });
@@ -352,7 +293,15 @@
             if (roomData.status === 'lobby') {
                 return (
                     <div className="h-screen flex flex-col items-center justify-center bg-gray-900 text-white relative">
-                        <div className="absolute top-4 left-4 text-gray-500">LOBİ: <span className="text-yellow-500 font-bold">{roomCode}</span></div>
+                        {/* Lobi Kodu Kopyalama (Eklendi) */}
+                        <div className="absolute top-4 left-4 bg-gray-800 px-4 py-2 rounded-lg flex items-center gap-3 border border-gray-700 shadow-lg">
+                            <span className="text-gray-400 text-sm">ODA:</span>
+                            <span className="text-yellow-500 font-bold text-xl tracking-widest">{roomCode}</span>
+                            <button onClick={() => navigator.clipboard.writeText(roomCode)} className="text-gray-400 hover:text-white transition" title="Kopyala">
+                                <Icon p={Icons.Copy} s={16}/>
+                            </button>
+                        </div>
+
                         <button onClick={leaveRoom} className="absolute top-4 right-4 text-red-500 hover:text-red-400"><Icon p={Icons.LogOut} /></button>
                         <h2 className="text-3xl font-bold mb-8">Oyuncular Bekleniyor... ({players.length}/{MAX_PLAYERS})</h2>
                         <div className="flex gap-4 mb-8">
@@ -364,9 +313,7 @@
                                 </div>
                             ))}
                             {[...Array(MAX_PLAYERS - players.length)].map((_,i) => (
-                                <div key={i} className="bg-gray-800/50 p-6 rounded-xl border border-dashed border-gray-600 flex flex-col items-center justify-center min-w-[120px] text-gray-500">
-                                    <span className="text-sm">Boş</span>
-                                </div>
+                                <div key={i} className="bg-gray-800/50 p-6 rounded-xl border border-dashed border-gray-600 flex flex-col items-center justify-center min-w-[120px] text-gray-500"><span className="text-sm">Boş</span></div>
                             ))}
                         </div>
                         {isHost ? (
@@ -392,10 +339,7 @@
                             <div className="space-y-2">
                                 {roomData.turnOrder.map((uid, idx) => {
                                     const p = roomData.players[uid];
-                                    // CRASH FIX: Oyuncu oyundan çıktıysa burada p undefined olur.
-                                    // Eğer p yoksa, bu kişiyi listede çizme.
                                     if (!p) return null;
-
                                     const isActive = uid === currentPlayerId;
                                     return (
                                         <div key={uid} className={`p-3 rounded-lg flex items-center gap-3 border transition-all ${isActive ? 'bg-gray-700 border-yellow-500 scale-105 shadow-lg' : 'bg-gray-800 border-transparent opacity-70'}`}>
