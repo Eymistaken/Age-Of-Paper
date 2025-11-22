@@ -17,9 +17,15 @@
         ::-webkit-scrollbar-track { background: #2d3748; }
         ::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: #718096; }
-        .default-land { fill: #4a5568; stroke: #2d3748; stroke-width: 1px; transition: all 0.2s; cursor: pointer; vector-effect: non-scaling-stroke; }
-        .default-land:hover { fill: #718096; filter: brightness(1.1); }
+        .default-land { fill: #4a5568; stroke: #2d3748; stroke-width: 1px; transition: fill 0.3s; cursor: pointer; vector-effect: non-scaling-stroke; }
+        .default-land:hover { filter: brightness(1.1); }
         .selected-land { stroke: #ecc94b !important; stroke-width: 3px !important; filter: drop-shadow(0 0 5px rgba(236, 201, 75, 0.5)); }
+        
+        /* Asker Dairesi Stili */
+        .troop-circle { fill: rgba(0,0,0,0.6); stroke: white; stroke-width: 1px; pointer-events: none; }
+        .troop-text { font-size: 10px; fill: white; text-anchor: middle; dominant-baseline: central; font-weight: bold; pointer-events: none; }
+        .port-icon { font-size: 10px; pointer-events: none; }
+
         @keyframes pulse-border { 0% { border-color: #ecc94b; box-shadow: 0 0 0 0 rgba(236, 201, 75, 0.7); } 70% { border-color: #b7791f; box-shadow: 0 0 0 10px rgba(236, 201, 75, 0); } 100% { border-color: #ecc94b; box-shadow: 0 0 0 0 rgba(236, 201, 75, 0); } }
         .turn-active { animation: pulse-border 2s infinite; border: 2px solid #ecc94b; }
         .glass-panel { background: rgba(26, 32, 44, 0.9); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
@@ -50,8 +56,11 @@
         const COLORS = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B'];
         const MAX_PLAYERS = 4;
         const STARTING_MONEY = 50000;
-        const REGION_COST = 10000;
-        const TURN_INCOME = 5000;
+        const PORT_COST = 90000;
+        const SOLDIER_COST = 10000; // 1000 asker fiyatı
+        const SOLDIER_BATCH = 1000;
+        const BASE_INCOME = 5000;
+        
         const ACTIVE_TIMEOUT = 7000; 
         const HEARTBEAT_INTERVAL = 2000;
 
@@ -59,16 +68,16 @@
         
         const Icons = {
             User: <><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>,
-            Users: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>,
             Copy: <><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></>,
             LogOut: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></>,
             Send: <><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></>,
             Map: <><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></>,
-            Play: <polygon points="5 3 19 12 5 21 5 3"/>,
             Coins: <><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m7.1 13.8 1.3-1.2"/></>,
             Shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/>,
             Trash: <><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>,
-            WifiOff: <><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></>
+            WifiOff: <><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></>,
+            Anchor: <><circle cx="12" cy="5" r="3"/><line x1="12" y1="22" x2="12" y2="8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/></>,
+            Sword: <><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" y1="19" x2="19" y2="13"/><line x1="16" y1="16" x2="20" y2="20"/><line x1="19" y1="21" x2="21" y2="19"/></>
         };
 
         const { useState, useEffect, useRef } = React;
@@ -135,7 +144,6 @@
                 return () => unsub();
             }, [user, roomCode]);
 
-            // Heartbeat
             useEffect(() => {
                 if(!user || !roomCode || !roomData) return;
                 const interval = setInterval(() => {
@@ -167,6 +175,7 @@
                 const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Sunucu yanıt vermedi.")), 10000));
                 const writePromise = setDoc(doc(db, 'rooms', code), {
                     hostId: user.uid, status: 'lobby', mapSvg: '', turnIndex: 0, turnOrder: [],
+                    isWar: false, // Savaş modu
                     players: { 
                         [user.uid]: { 
                             id: user.uid, 
@@ -174,7 +183,8 @@
                             color: COLORS[0], 
                             money: STARTING_MONEY, 
                             ready: true,
-                            lastActive: Date.now()
+                            lastActive: Date.now(),
+                            reserve: 0 // Rezerv Asker
                         } 
                     },
                     chat: [], gameData: {}
@@ -192,12 +202,10 @@
                 const roomRef = doc(db, 'rooms', code);
                 try {
                     const snap = await getDoc(roomRef);
-                    
                     if (!snap.exists()) {
                         setLoading(false);
-                        return setError("Oda bulunamadı! Kodun doğruluğunu kontrol edin.");
+                        return setError("Oda bulunamadı!");
                     }
-                    
                     const data = snap.data();
                     if (Object.keys(data.players).length >= MAX_PLAYERS) throw new Error("Oda dolu.");
                     if (data.status === 'playing') throw new Error("Oyun başlamış.");
@@ -209,7 +217,8 @@
                             color: COLORS[playerIndex], 
                             money: STARTING_MONEY, 
                             ready: true,
-                            lastActive: Date.now()
+                            lastActive: Date.now(),
+                            reserve: 0
                         } 
                     });
                     localStorage.setItem('aop_nickname', nickname);
@@ -222,14 +231,9 @@
                     try {
                         const roomRef = doc(db, 'rooms', roomCode);
                         await updateDoc(roomRef, { [`players.${user.uid}`]: deleteField() });
-                        
                         const snap = await getDoc(roomRef);
-                        if (snap.exists()) {
-                            const players = snap.data().players || {};
-                            if (Object.keys(players).length === 0) {
-                                await deleteDoc(roomRef);
-                                console.log("Oda boşaldığı için silindi:", roomCode);
-                            }
+                        if (snap.exists() && Object.keys(snap.data().players || {}).length === 0) {
+                            await deleteDoc(roomRef);
                         }
                     } catch(e) { console.log("Çıkış hatası", e); }
                 }
@@ -269,6 +273,7 @@
             const [selectedCost, setSelectedCost] = useState(0);
             const [msg, setMsg] = useState('');
             const [now, setNow] = useState(Date.now());
+            const [attackSource, setAttackSource] = useState(null); // Saldırı kaynağı (şehir ID)
             const svgRef = useRef(null);
             const chatEndRef = useRef(null);
 
@@ -277,16 +282,27 @@
             const me = roomData.players[user.uid];
             const currentPlayerId = roomData.status === 'playing' ? roomData.turnOrder[roomData.turnIndex] : null;
             const isMyTurn = currentPlayerId === user.uid;
-            
             const selectedEl = selectedId ? document.getElementById(selectedId) : null;
             const regionName = selectedEl ? selectedEl.getAttribute('data-name') : "Seçilmedi";
+            const isOwnedByMe = selectedId && roomData.gameData[selectedId]?.owner === user.uid;
+            const isOwnedByEnemy = selectedId && roomData.gameData[selectedId]?.owner && roomData.gameData[selectedId]?.owner !== user.uid;
+
+            // Savaş Modu Kontrolü: Tüm bölgeler doluysa savaş başlar
+            useEffect(() => {
+                if (isHost && roomData.status === 'playing' && !roomData.isWar) {
+                    const allRegions = svgRef.current ? svgRef.current.querySelectorAll('path, polygon, circle').length : 999;
+                    const ownedRegions = Object.keys(roomData.gameData || {}).length;
+                    if (ownedRegions >= allRegions && allRegions > 0) {
+                         updateDoc(doc(db, 'rooms', roomCode), { isWar: true });
+                    }
+                }
+            }, [roomData, isHost]);
 
             useEffect(() => {
                 const t = setInterval(() => setNow(Date.now()), 1000);
                 return () => clearInterval(t);
             }, []);
 
-            // --- AUTO-SKIP ---
             useEffect(() => {
                 if (roomData.status === 'playing' && currentPlayerId) {
                     const currentPlayer = roomData.players[currentPlayerId];
@@ -309,6 +325,7 @@
             useEffect(() => {
                 if(!selectedId) {
                     setSelectedCost(0);
+                    setAttackSource(null); // Seçim değişince saldırı kaynağını sıfırla
                     return;
                 }
                 const el = document.getElementById(selectedId);
@@ -352,42 +369,146 @@
                 await updateDoc(doc(db, 'rooms', roomCode), { status: 'playing', turnOrder: shuffled, turnIndex: 0 });
             };
 
+            // Basit Komşuluk Kontrolü (Geometrik Çarpışma)
+            const isAdjacent = (id1, id2) => {
+                const el1 = document.getElementById(id1);
+                const el2 = document.getElementById(id2);
+                if(!el1 || !el2) return false;
+                const r1 = el1.getBoundingClientRect();
+                const r2 = el2.getBoundingClientRect();
+                const tol = 20; // Tolerans (Piksel)
+                return !(r1.right + tol < r2.left || r1.left - tol > r2.right || r1.bottom + tol < r2.top || r1.top - tol > r2.bottom);
+            };
+
+            // Genel "Komşu mu?" kontrolü (Eski sistem için)
             const checkAdjacency = (targetId) => {
                 const myLandIds = Object.entries(roomData.gameData || {}).filter(([_, data]) => data.owner === user.uid).map(([id]) => id);
                 if (myLandIds.length === 0) return true;
-                const targetEl = document.getElementById(targetId);
-                if (!targetEl) return false;
-                const tRect = targetEl.getBoundingClientRect();
-                const tolerance = 50;
-                return myLandIds.some(landId => {
-                    const landEl = document.getElementById(landId);
-                    if (!landEl) return false;
-                    const lRect = landEl.getBoundingClientRect();
-                    return !(tRect.right + tolerance < lRect.left || tRect.left - tolerance > lRect.right || tRect.bottom + tolerance < lRect.top || tRect.top - tolerance > lRect.bottom);
-                });
+                return myLandIds.some(landId => isAdjacent(targetId, landId));
             };
 
             const buyRegion = async () => {
                 if(!isMyTurn || !selectedId) return;
-                if(roomData.gameData[selectedId]?.owner) return alert("Bu bölge zaten birine ait!");
-                if(me.money < selectedCost) return alert(`Yetersiz Bakiye! (Gereken: ${selectedCost})`);
-                if (!checkAdjacency(selectedId)) return alert("Sadece sınır komşusu olan bölgeleri satın alabilirsin! (İlk bölge hariç)");
+                if(roomData.gameData[selectedId]?.owner) return alert("Sahipli bölge!");
+                if(me.money < selectedCost) return alert(`Yetersiz Bakiye!`);
+                if (!checkAdjacency(selectedId)) return alert("Sınır komşusu gerekli!");
 
                 await updateDoc(doc(db, 'rooms', roomCode), {
-                    [`gameData.${selectedId}`]: { owner: user.uid, color: me.color },
+                    [`gameData.${selectedId}`]: { owner: user.uid, color: me.color, soldiers: 0, hasPort: false },
                     [`players.${user.uid}.money`]: increment(-selectedCost),
                     turnIndex: (roomData.turnIndex + 1) % roomData.turnOrder.length
                 });
                 setSelectedId(null);
             };
 
+            // MAAŞ HESAPLAMA (Yeni Sistem: 5000 + ToplamDeğer/10)
+            const calculateIncome = () => {
+                let totalValue = 0;
+                const myLandIds = Object.entries(roomData.gameData || {}).filter(([_, data]) => data.owner === user.uid).map(([id]) => id);
+                
+                myLandIds.forEach(id => {
+                    const el = document.getElementById(id);
+                    if(el) {
+                        const bbox = el.getBBox();
+                        let price = (bbox.width * bbox.height) / 15 + 4000;
+                        totalValue += Math.ceil(price / 100) * 100;
+                    }
+                });
+                return BASE_INCOME + Math.floor(totalValue / 10);
+            };
+
             const passTurn = async () => {
                 if(!isMyTurn) return;
+                const income = calculateIncome();
                 await updateDoc(doc(db, 'rooms', roomCode), {
-                    [`players.${user.uid}.money`]: increment(TURN_INCOME),
+                    [`players.${user.uid}.money`]: increment(income),
                     turnIndex: (roomData.turnIndex + 1) % roomData.turnOrder.length
                 });
             };
+
+            // --- SAVAŞ FONKSİYONLARI ---
+            const trainSoldiers = async () => {
+                if(me.money < SOLDIER_COST) return alert("Yetersiz para!");
+                await updateDoc(doc(db, 'rooms', roomCode), {
+                    [`players.${user.uid}.money`]: increment(-SOLDIER_COST),
+                    [`players.${user.uid}.reserve`]: increment(SOLDIER_BATCH)
+                });
+            };
+
+            const deploySoldiers = async () => {
+                if(!isMyTurn || !selectedId || !isOwnedByMe) return;
+                if(me.reserve < SOLDIER_BATCH) return alert("Rezervde asker yok! Önce eğit.");
+                
+                await updateDoc(doc(db, 'rooms', roomCode), {
+                    [`players.${user.uid}.reserve`]: increment(-SOLDIER_BATCH),
+                    [`gameData.${selectedId}.soldiers`]: increment(SOLDIER_BATCH)
+                });
+                // Asker konuşlandırmak tur yemez (Genelde strateji oyunlarında böyledir, istenirse eklenebilir)
+            };
+
+            const buildPort = async () => {
+                if(!isMyTurn || !selectedId || !isOwnedByMe) return;
+                if(me.money < PORT_COST) return alert("Liman için 90.000$ lazım!");
+                // Basitlik için her yere liman kurulabilir (Kullanıcı isteği: Denize kıyı kontrolü zor olduğu için)
+                
+                await updateDoc(doc(db, 'rooms', roomCode), {
+                    [`players.${user.uid}.money`]: increment(-PORT_COST),
+                    [`gameData.${selectedId}.hasPort`]: true
+                });
+            };
+
+            const attack = async (type) => {
+                if(!isMyTurn || !selectedId || !isOwnedByEnemy || !attackSource) return alert("Kaynak seçilmedi!");
+                
+                const sourceData = roomData.gameData[attackSource];
+                const targetData = roomData.gameData[selectedId];
+                const attackAmount = sourceData.soldiers;
+
+                if(attackAmount <= 0) return alert("Saldıracak asker yok!");
+
+                // KURALLAR
+                if (type === 'LAND') {
+                    if(!isAdjacent(attackSource, selectedId)) return alert("Kara saldırısı için sınır komşusu olmalı!");
+                } else if (type === 'SEA') {
+                    if(!sourceData.hasPort) return alert("Deniz saldırısı için kaynak şehirde Liman olmalı!");
+                    // Hedefin kıyısı var mı kontrolü (Basitlik için her yere saldırılabilir kabul ediyoruz, aksi halde çok kompleks)
+                }
+
+                // SAVAŞ MATEMATİĞİ
+                const defenderAmount = targetData.soldiers || 0;
+                
+                if (attackAmount > defenderAmount) {
+                    // SALDIRAN KAZANDI
+                    const survivors = attackAmount - defenderAmount;
+                    await updateDoc(doc(db, 'rooms', roomCode), {
+                        [`gameData.${attackSource}.soldiers`]: 0, // Askerler yola çıktı
+                        [`gameData.${selectedId}`]: { 
+                            owner: user.uid, 
+                            color: me.color, 
+                            soldiers: survivors, 
+                            hasPort: targetData.hasPort // Liman kalır
+                        },
+                        turnIndex: (roomData.turnIndex + 1) % roomData.turnOrder.length
+                    });
+                } else {
+                    // SAVUNAN KAZANDI
+                    const remainingDefenders = defenderAmount - attackAmount; // Aslında düşman da kaybediyor mu?
+                    // Kullanıcı dedi ki: "sendeki askerlerin hepsi ölür ve düşman o alana... (yok bu savunma)"
+                    // "senin 10000 askerin gider, düşmanın askerleri türkiyeyi ele geçiremez" (Eğer savunansan).
+                    // Yani saldıran kaybederse hepsi ölür. Savunan ne kadar kaybeder?
+                    // Basit mantık: Savunan, Saldıran kadar asker kaybeder.
+                    // Eğer Saldıran < Savunan ise -> Saldıran ölür (0), Savunan = Savunan - Saldıran.
+                    
+                    await updateDoc(doc(db, 'rooms', roomCode), {
+                        [`gameData.${attackSource}.soldiers`]: 0, // Hepsi öldü
+                        [`gameData.${selectedId}.soldiers`]: defenderAmount - attackAmount, // Savunanın kaybı
+                         turnIndex: (roomData.turnIndex + 1) % roomData.turnOrder.length
+                    });
+                }
+                setSelectedId(null);
+                setAttackSource(null);
+            };
+
 
             const sendMessage = async (e) => {
                 e.preventDefault();
@@ -396,12 +517,18 @@
                 setMsg('');
             };
 
+            // SVG Render & Asker Gösterimi
             useEffect(() => {
                 if(svgRef.current && roomData.mapSvg) {
                     const paths = svgRef.current.querySelectorAll('path, polygon, circle');
+                    // Mevcut etiketleri temizle
+                    const oldLabels = svgRef.current.querySelectorAll('.troop-label-group');
+                    oldLabels.forEach(l => l.remove());
+
                     paths.forEach((p, idx) => {
                         let id = p.getAttribute('id');
                         if(!id) { id = `land_${idx}`; p.setAttribute('id', id); }
+                        
                         let displayName = p.getAttribute('data-original-name');
                         if (!displayName) {
                             const rawName = p.getAttribute('name') || p.getAttribute('class') || id;
@@ -409,6 +536,7 @@
                             p.setAttribute('data-original-name', displayName);
                         }
                         p.setAttribute('data-name', displayName);
+
                         const region = roomData.gameData[id];
                         p.setAttribute('class', 'default-land');
                         p.style.fill = region ? region.color : '#4a5568';
@@ -416,6 +544,47 @@
                         if(id === selectedId) { p.classList.add('selected-land'); } 
                         else { p.classList.remove('selected-land'); }
                         p.onclick = (e) => { e.stopPropagation(); setSelectedId(id); };
+
+                        // Asker Sayısı ve Liman Gösterimi
+                        if (region && (region.soldiers > 0 || region.hasPort)) {
+                            const bbox = p.getBBox();
+                            const cx = bbox.x + bbox.width / 2;
+                            const cy = bbox.y + bbox.height / 2;
+                            
+                            // SVG içine grup ekle
+                            const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                            g.setAttribute("class", "troop-label-group");
+                            g.setAttribute("style", "pointer-events: none;");
+
+                            if (region.soldiers > 0) {
+                                const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                                circle.setAttribute("cx", cx);
+                                circle.setAttribute("cy", cy);
+                                circle.setAttribute("r", "8"); // Boyut
+                                circle.setAttribute("class", "troop-circle");
+                                
+                                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                                text.setAttribute("x", cx);
+                                text.setAttribute("y", cy);
+                                text.setAttribute("class", "troop-text");
+                                text.textContent = region.soldiers >= 1000 ? (region.soldiers/1000) + 'k' : region.soldiers;
+                                
+                                g.appendChild(circle);
+                                g.appendChild(text);
+                            }
+
+                            if (region.hasPort) {
+                                const textP = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                                textP.setAttribute("x", cx + 10);
+                                textP.setAttribute("y", cy - 10);
+                                textP.setAttribute("class", "port-icon");
+                                textP.textContent = "⚓";
+                                g.appendChild(textP);
+                            }
+
+                            // SVG'ye ekle (Path'ten sonra)
+                            p.parentNode.appendChild(g);
+                        }
                     });
                 }
             }, [roomData.mapSvg, roomData.gameData, selectedId]);
@@ -428,9 +597,7 @@
                             <span className="text-yellow-500 font-bold text-xl tracking-widest">{roomCode}</span>
                             <CopyBtn code={roomCode} />
                         </div>
-
                         <button onClick={resetApp} className="absolute top-4 left-48 text-xs text-gray-600 hover:text-red-400 flex items-center gap-1 z-50"><Icon p={Icons.Trash} s={12}/> Sıfırla</button>
-
                         <button onClick={leaveRoom} className="absolute top-4 right-4 text-red-500 hover:text-red-400"><Icon p={Icons.LogOut} /></button>
                         <h2 className="text-3xl font-bold mb-8">Oyuncular Bekleniyor... ({players.length}/{MAX_PLAYERS})</h2>
                         <div className="flex gap-4 mb-8">
@@ -441,25 +608,14 @@
                                     {p.id === roomData.hostId && <span className="text-xs text-yellow-500 mt-1">👑 KURUCU</span>}
                                 </div>
                             ))}
-                            {[...Array(MAX_PLAYERS - players.length)].map((_,i) => (
-                                <div key={i} className="bg-gray-800/50 p-6 rounded-xl border border-dashed border-gray-600 flex flex-col items-center justify-center min-w-[120px] text-gray-500"><span className="text-sm">Boş</span></div>
-                            ))}
+                            {[...Array(MAX_PLAYERS - players.length)].map((_,i) => (<div key={i} className="bg-gray-800/50 p-6 rounded-xl border border-dashed border-gray-600 flex flex-col items-center justify-center min-w-[120px] text-gray-500"><span className="text-sm">Boş</span></div>))}
                         </div>
-                        
-                        {/* HOST KONTROLÜ: Sadece kurucu bu butonları görür */}
                         {isHost ? (
                             <div className="flex flex-col items-center gap-4">
-                                {!roomData.mapSvg && (
-                                    <label className="cursor-pointer bg-gray-700 hover:bg-gray-600 px-6 py-3 rounded-lg border border-gray-500 transition">
-                                        <span className="flex items-center gap-2"><Icon p={Icons.Map}/> Harita Dosyası Yükle (.svg)</span>
-                                        <input type="file" accept=".svg" onChange={handleMapUpload} className="hidden"/>
-                                    </label>
-                                )}
+                                {!roomData.mapSvg && (<label className="cursor-pointer bg-gray-700 hover:bg-gray-600 px-6 py-3 rounded-lg border border-gray-500 transition"><span className="flex items-center gap-2"><Icon p={Icons.Map}/> Harita Dosyası Yükle (.svg)</span><input type="file" accept=".svg" onChange={handleMapUpload} className="hidden"/></label>)}
                                 <button onClick={startGame} disabled={!roomData.mapSvg} className={`px-8 py-4 rounded-lg font-bold text-lg shadow-lg transition ${roomData.mapSvg ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}>{roomData.mapSvg ? "OYUNU BAŞLAT" : "Önce Harita Yükle"}</button>
                             </div>
-                        ) : (
-                            <div className="text-gray-400 animate-pulse font-bold">Kurucunun oyunu başlatması bekleniyor...</div>
-                        )}
+                        ) : <div className="text-gray-400 animate-pulse">Kurucunun oyunu başlatması bekleniyor...</div>}
                     </div>
                 );
             }
@@ -474,8 +630,7 @@
                                     const p = roomData.players[uid];
                                     if (!p) return null;
                                     const isActive = uid === currentPlayerId;
-                                    const isOffline = (now - (p.lastActive || 0)) > ACTIVE_TIMEOUT;
-
+                                    const isOffline = (Date.now() - (p.lastActive || 0)) > ACTIVE_TIMEOUT;
                                     return (
                                         <div key={uid} className={`p-3 rounded-lg flex items-center gap-3 border transition-all ${isActive ? 'bg-gray-700 border-yellow-500 scale-105 shadow-lg' : 'bg-gray-800 border-transparent opacity-70'} ${isOffline ? 'opacity-50 grayscale' : ''}`}>
                                             <div className="w-2 h-full rounded-full self-stretch" style={{backgroundColor: p.color}}></div>
@@ -505,40 +660,14 @@
                             </form>
                         </div>
                     </div>
-                    <div className="flex-1 relative bg-[#1a202c] overflow-hidden cursor-grab active:cursor-grabbing"
-                        onMouseDown={e => { if(e.button===0) { setDragging(true); setDragStart({x: e.clientX - pos.x, y: e.clientY - pos.y}) }}}
-                        onMouseMove={e => { if(dragging) setPos({x: e.clientX - dragStart.x, y: e.clientY - dragStart.y}) }}
-                        onMouseUp={() => setDragging(false)}
-                        onMouseLeave={() => setDragging(false)}
-                        onWheel={handleWheel}
-                    >
-                        <div 
-                            style={{ 
-                                transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`, 
-                                transformOrigin: '0 0', 
-                                transition: dragging ? 'none' : 'transform 0.1s',
-                                willChange: 'transform'
-                            }} 
-                            className="w-full h-full absolute top-0 left-0"
-                        >
-                            {roomData.mapSvg && <div ref={svgRef} dangerouslySetInnerHTML={{__html: roomData.mapSvg}} className="w-full h-full"/>}
-                        </div>
-                        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 glass-panel px-6 py-2 rounded-full flex items-center gap-6 shadow-lg z-10">
-                            <div className="flex items-center gap-2 font-bold text-xl">
-                                <span className="text-yellow-500">{roomCode}</span>
-                                <CopyBtn code={roomCode} />
-                            </div>
-                            <div className="w-px h-6 bg-gray-600"></div>
-                            <div className="text-sm text-gray-300">Tur: <span className="text-white font-bold">{roomData.turnIndex + 1}</span></div>
-                            <button onClick={leaveRoom} className="text-red-400 hover:text-red-300"><Icon p={Icons.LogOut}/></button>
-                        </div>
-                        <button onClick={resetApp} className="absolute bottom-4 left-4 text-xs text-gray-600 hover:text-red-400 flex items-center gap-1 z-50 bg-gray-800/50 px-2 py-1 rounded"><Icon p={Icons.Trash} s={12}/> Sıfırla</button>
-                    </div>
+                    <div className="flex-1 relative bg-[#1a202c] overflow-hidden cursor-grab active:cursor-grabbing" onMouseDown={e => { if(e.button===0) { setDragging(true); setDragStart({x: e.clientX - pos.x, y: e.clientY - pos.y}) }}} onMouseMove={e => { if(dragging) setPos({x: e.clientX - dragStart.x, y: e.clientY - dragStart.y}) }} onMouseUp={() => setDragging(false)} onMouseLeave={() => setDragging(false)} onWheel={handleWheel}><div style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`, transformOrigin: '0 0', transition: dragging ? 'none' : 'transform 0.1s', willChange: 'transform' }} className="w-full h-full absolute top-0 left-0">{roomData.mapSvg && <div ref={svgRef} dangerouslySetInnerHTML={{__html: roomData.mapSvg}} className="w-full h-full"/>}</div><div className="absolute top-4 left-1/2 transform -translate-x-1/2 glass-panel px-6 py-2 rounded-full flex items-center gap-6 shadow-lg z-10"><div className="flex items-center gap-2 font-bold text-xl"><span className="text-yellow-500">{roomCode}</span><CopyBtn code={roomCode} /></div><div className="w-px h-6 bg-gray-600"></div><div className="text-sm text-gray-300">Tur: <span className="text-white font-bold">{roomData.turnIndex + 1}</span></div><button onClick={leaveRoom} className="text-red-400 hover:text-red-300"><Icon p={Icons.LogOut}/></button></div><button onClick={resetApp} className="absolute bottom-4 left-4 text-xs text-gray-600 hover:text-red-400 flex items-center gap-1 z-50 bg-gray-800/50 px-2 py-1 rounded"><Icon p={Icons.Trash} s={12}/> Sıfırla</button></div>
                     <div className="w-72 bg-gray-800 border-l border-gray-700 p-4 flex flex-col z-20 shadow-xl">
                         <div className="mb-6 text-center">
                             <div className="w-16 h-16 rounded-full mx-auto mb-2 flex items-center justify-center text-2xl font-bold border-4 shadow-lg" style={{borderColor: me.color, backgroundColor: '#2d3748', color: me.color}}>{me.name[0]}</div>
                             <div className="font-bold text-lg">{me.name}</div>
                             <div className="text-yellow-400 font-mono text-xl font-bold mt-1 flex items-center justify-center gap-2"><span>💰</span> {me.money.toLocaleString()}</div>
+                            {/* REZERV ASKER GÖSTERGESİ */}
+                            {roomData.isWar && <div className="text-red-400 font-mono text-sm font-bold mt-1 flex items-center justify-center gap-2"><span>⚔️</span> {me.reserve || 0} (Hazır)</div>}
                         </div>
                         <div className="flex-1">
                             {isMyTurn ? (
@@ -549,38 +678,62 @@
                                         <div className="text-xs text-gray-400 mb-1 uppercase font-bold">Seçili Bölge</div>
                                         <div className="font-bold text-lg mb-2 truncate">{regionName}</div>
                                         {selectedId ? (
-                                            (roomData.gameData[selectedId]?.owner) ? (
-                                                <div className="text-red-400 text-sm font-bold text-center py-2 border border-red-500/30 bg-red-500/10 rounded">Sahipli Bölge</div>
-                                            ) : (
-                                                <button onClick={buyRegion} className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded shadow transition flex items-center justify-center gap-2">
-                                                    <span>Satın Al</span>
-                                                    {/* DİNAMİK FİYAT GÖSTERİMİ */}
-                                                    <span className="bg-green-700 px-1.5 rounded text-xs">{selectedCost.toLocaleString()} $</span>
-                                                </button>
-                                            )
+                                            <>
+                                                {/* ARAZİ KAPMA DÖNEMİ */}
+                                                {!roomData.isWar && (
+                                                    !roomData.gameData[selectedId]?.owner ? (
+                                                        <button onClick={buyRegion} className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded shadow transition flex items-center justify-center gap-2"><span>Satın Al</span><span className="bg-green-700 px-1.5 rounded text-xs">{selectedCost.toLocaleString()} $</span></button>
+                                                    ) : <div className="text-red-400 text-sm font-bold text-center py-2 border border-red-500/30 bg-red-500/10 rounded">Sahipli Bölge</div>
+                                                )}
+
+                                                {/* SAVAŞ DÖNEMİ */}
+                                                {roomData.isWar && (
+                                                    isOwnedByMe ? (
+                                                        // KENDİ TOPRAĞIN: Asker Ekle veya Liman Kur
+                                                        <div className="space-y-2">
+                                                            <button onClick={deploySoldiers} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded shadow transition text-xs">Asker Yerleştir (1k)</button>
+                                                            {!roomData.gameData[selectedId].hasPort && <button onClick={buildPort} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded shadow transition text-xs flex items-center justify-center gap-1"><Icon p={Icons.Anchor} s={12}/> Liman Kur (90k)</button>}
+                                                        </div>
+                                                    ) : isOwnedByEnemy ? (
+                                                        // DÜŞMAN TOPRAĞI: Saldır
+                                                        <div className="space-y-2">
+                                                            <div className="text-xs text-center text-gray-400 mb-1">Saldırı Kaynağı Seç:</div>
+                                                            {/* Önce saldırı kaynağını seçmeli, sonra butona basmalı. Basitlik için: Seçili olan düşman, "attackSource" state'ine göre işlem yapacak. Ancak UI'da kaynak seçimi zor.
+                                                                Düzeltme: Saldırmak için önce KENDİ toprağına tıkla -> "Buradan Saldır" de (Set Source) -> Sonra Düşmana tıkla -> "Saldır" de.
+                                                             */}
+                                                             {attackSource ? (
+                                                                <div className="grid grid-cols-2 gap-2">
+                                                                    <button onClick={() => attack('LAND')} className="bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded text-xs">KARA HÜCUM</button>
+                                                                    <button onClick={() => attack('SEA')} className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded text-xs">DENİZ HÜCUM</button>
+                                                                </div>
+                                                             ) : <div className="text-xs text-center text-yellow-500">Önce kendi şehrini seçip "Hücum Üssü Yap" demelisin.</div>}
+                                                        </div>
+                                                    ) : <div className="text-gray-500 text-xs text-center">Tarafsız bölge</div>
+                                                )}
+                                            </>
                                         ) : <div className="text-xs text-gray-500 italic text-center">Haritadan bir yer seç...</div>}
+
+                                        {/* HÜCUM ÜSSÜ SEÇİMİ (Sadece Kendi Toprağında ve Savaşta) */}
+                                        {roomData.isWar && isOwnedByMe && (
+                                            <button onClick={() => setAttackSource(selectedId)} className={`w-full mt-2 font-bold py-1 rounded text-xs ${attackSource === selectedId ? 'bg-yellow-600 text-white' : 'bg-gray-600 text-gray-300 hover:bg-gray-500'}`}>
+                                                {attackSource === selectedId ? "Hücum Üssü Seçildi" : "Hücum Üssü Yap"}
+                                            </button>
+                                        )}
+
                                     </div>
 
-                                    <div className="relative flex items-center py-1">
-                                        <div className="flex-grow border-t border-gray-600"></div>
-                                        <span className="flex-shrink-0 mx-2 text-gray-500 text-xs">YA DA</span>
-                                        <div className="flex-grow border-t border-gray-600"></div>
-                                    </div>
+                                    {/* ASKERE AL BUTONU (Sadece Savaşta) */}
+                                    {roomData.isWar && (
+                                        <button onClick={trainSoldiers} className="w-full bg-gray-700 hover:bg-gray-600 border border-gray-500 text-white font-bold py-2 rounded shadow transition flex items-center justify-center gap-2 text-xs">
+                                            <span>🪖 Asker Eğit (1k)</span>
+                                            <span className="bg-gray-900 px-1.5 rounded text-[10px] text-gray-400">-10k $</span>
+                                        </button>
+                                    )}
 
-                                    <button onClick={passTurn} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded shadow transition flex items-center justify-center gap-2">
-                                        <Icon p={Icons.Coins} />
-                                        <div>
-                                            <div>Pas Geç</div>
-                                            <div className="text-[10px] font-normal text-blue-200">+ {TURN_INCOME} Gelir</div>
-                                        </div>
-                                    </button>
+                                    <div className="relative flex items-center py-1"><div className="flex-grow border-t border-gray-600"></div><span className="flex-shrink-0 mx-2 text-gray-500 text-xs">YA DA</span><div className="flex-grow border-t border-gray-600"></div></div>
+                                    <button onClick={passTurn} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded shadow transition flex items-center justify-center gap-2"><Icon p={Icons.Coins} /><div><div>Pas Geç</div><div className="text-[10px] font-normal text-blue-200">+ Gelir</div></div></button>
                                 </div>
-                            ) : (
-                                <div className="text-center text-gray-500 py-10 bg-gray-700/30 rounded-lg border border-gray-700 border-dashed">
-                                    <div className="animate-spin inline-block mb-2"><Icon p={Icons.Shield}/></div>
-                                    <div>Sıra Bekleniyor...</div>
-                                </div>
-                            )}
+                            ) : (<div className="text-center text-gray-500 py-10 bg-gray-700/30 rounded-lg border border-gray-700 border-dashed"><div className="animate-spin inline-block mb-2"><Icon p={Icons.Shield}/></div><div>Sıra Bekleniyor...</div></div>)}
                         </div>
                     </div>
                 </div>
