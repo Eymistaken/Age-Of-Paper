@@ -52,10 +52,8 @@
         const STARTING_MONEY = 50000;
         const REGION_COST = 10000;
         const TURN_INCOME = 5000;
-        
-        // YENİ ZAMAN AYARLARI (Daha Hızlı Tepki)
-        const ACTIVE_TIMEOUT = 7000; // 7 saniye ses yoksa offline say
-        const HEARTBEAT_INTERVAL = 2000; // 2 saniyede bir "ben buradayım" de
+        const ACTIVE_TIMEOUT = 7000; 
+        const HEARTBEAT_INTERVAL = 2000;
 
         const Icon = ({p, s=20, c=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={c}>{p}</svg>;
         
@@ -99,11 +97,7 @@
 
             useEffect(() => {
                 const unsub = onAuthStateChanged(auth, (u) => {
-                    if (u) {
-                        setUser(u);
-                        console.log("%c SENİN ID NUMARAN AŞAĞIDA:", "color: yellow; font-size: 20px; font-weight: bold;");
-                        console.log("%c" + u.uid, "color: lime; font-size: 24px; font-weight: bold; background: #333; padding: 5px;");
-                    }
+                    if (u) setUser(u);
                     else signInAnonymously(auth).catch(e => setError("Giriş Hatası: " + e.message));
                 });
                 return () => unsub();
@@ -141,17 +135,14 @@
                 return () => unsub();
             }, [user, roomCode]);
 
-            // --- HIZLANDIRILMIŞ HEARTBEAT ---
-            // Her 2 saniyede bir güncelleme gönderir.
+            // Heartbeat
             useEffect(() => {
                 if(!user || !roomCode || !roomData) return;
-                
                 const interval = setInterval(() => {
                     updateDoc(doc(db, 'rooms', roomCode), {
                         [`players.${user.uid}.lastActive`]: Date.now()
                     }).catch(e => console.log("Heartbeat fail", e));
                 }, HEARTBEAT_INTERVAL);
-
                 return () => clearInterval(interval);
             }, [user, roomCode, roomData]);
 
@@ -277,7 +268,7 @@
             const [selectedId, setSelectedId] = useState(null);
             const [selectedCost, setSelectedCost] = useState(0);
             const [msg, setMsg] = useState('');
-            const [now, setNow] = useState(Date.now()); // Zaman sayacı
+            const [now, setNow] = useState(Date.now());
             const svgRef = useRef(null);
             const chatEndRef = useRef(null);
 
@@ -290,33 +281,26 @@
             const selectedEl = selectedId ? document.getElementById(selectedId) : null;
             const regionName = selectedEl ? selectedEl.getAttribute('data-name') : "Seçilmedi";
 
-            // Zamanı güncelle (Daha sık kontrol için 1sn'ye çekildi)
             useEffect(() => {
                 const t = setInterval(() => setNow(Date.now()), 1000);
                 return () => clearInterval(t);
             }, []);
 
-            // --- AUTO-SKIP (OTOMATİK SIRA ATLAMA - 7sn) ---
+            // --- AUTO-SKIP ---
             useEffect(() => {
                 if (roomData.status === 'playing' && currentPlayerId) {
                     const currentPlayer = roomData.players[currentPlayerId];
                     if (currentPlayer) {
                         const isOffline = (now - (currentPlayer.lastActive || 0)) > ACTIVE_TIMEOUT;
-                        
-                        if (isOffline) {
-                            // Sadece HOST olan kişi bu atlamayı tetikler (Çakışma olmasın diye)
-                            // Eğer HOST da offline ise (veya yoksa), o zaman sıradaki canlı oyuncu tetikler.
-                            // Şimdilik basitçe: "Ben oyundaysam ve sıradaki kişi ölüyse" mantığı yeterli.
-                            if (isHost) {
-                                console.log("Oyuncu çevrimdışı (7sn), sıra atlanıyor:", currentPlayer.name);
+                        if (isOffline && user.uid !== currentPlayerId) {
+                             if (Math.random() < 0.1) {
                                 const nextIdx = (roomData.turnIndex + 1) % roomData.turnOrder.length;
-                                updateDoc(doc(db, 'rooms', roomCode), { turnIndex: nextIdx });
-                            }
+                                updateDoc(doc(db, 'rooms', roomCode), { turnIndex: nextIdx }).catch(()=>{});
+                             }
                         }
                     }
                 }
-            }, [now, currentPlayerId, roomData, isHost, roomCode]);
-
+            }, [now, currentPlayerId, roomData, roomCode, user.uid]);
 
             useEffect(() => {
                 chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -343,18 +327,14 @@
             const handleWheel = (e) => {
                 const factor = e.deltaY > 0 ? 0.9 : 1.1;
                 const newScale = Math.max(0.5, Math.min(20, scale * factor));
-                
                 const rect = e.currentTarget.getBoundingClientRect();
                 const mouseX = e.clientX - rect.left;
                 const mouseY = e.clientY - rect.top;
-                
                 const worldX = (mouseX - pos.x) / scale;
                 const worldY = (mouseY - pos.y) / scale;
-                
-                const newX = mouseX - worldX * newScale;
-                const newY = mouseY - worldY * newScale;
-
-                setPos({x: newX, y: newY});
+                const nx = mouseX - worldX * newScale;
+                const ny = mouseY - worldY * newScale;
+                setPos({x: nx, y: ny});
                 setScale(newScale);
             };
 
@@ -421,10 +401,7 @@
                     const paths = svgRef.current.querySelectorAll('path, polygon, circle');
                     paths.forEach((p, idx) => {
                         let id = p.getAttribute('id');
-                        if(!id) { 
-                            id = `land_${idx}`; 
-                            p.setAttribute('id', id); 
-                        }
+                        if(!id) { id = `land_${idx}`; p.setAttribute('id', id); }
                         let displayName = p.getAttribute('data-original-name');
                         if (!displayName) {
                             const rawName = p.getAttribute('name') || p.getAttribute('class') || id;
@@ -468,6 +445,8 @@
                                 <div key={i} className="bg-gray-800/50 p-6 rounded-xl border border-dashed border-gray-600 flex flex-col items-center justify-center min-w-[120px] text-gray-500"><span className="text-sm">Boş</span></div>
                             ))}
                         </div>
+                        
+                        {/* HOST KONTROLÜ: Sadece kurucu bu butonları görür */}
                         {isHost ? (
                             <div className="flex flex-col items-center gap-4">
                                 {!roomData.mapSvg && (
@@ -478,7 +457,9 @@
                                 )}
                                 <button onClick={startGame} disabled={!roomData.mapSvg} className={`px-8 py-4 rounded-lg font-bold text-lg shadow-lg transition ${roomData.mapSvg ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}>{roomData.mapSvg ? "OYUNU BAŞLAT" : "Önce Harita Yükle"}</button>
                             </div>
-                        ) : <div className="text-gray-400 animate-pulse">Kurucunun oyunu başlatması bekleniyor...</div>}
+                        ) : (
+                            <div className="text-gray-400 animate-pulse font-bold">Kurucunun oyunu başlatması bekleniyor...</div>
+                        )}
                     </div>
                 );
             }
@@ -493,7 +474,6 @@
                                     const p = roomData.players[uid];
                                     if (!p) return null;
                                     const isActive = uid === currentPlayerId;
-                                    // AKTİFLİK KONTROLÜ (7 saniye)
                                     const isOffline = (now - (p.lastActive || 0)) > ACTIVE_TIMEOUT;
 
                                     return (
