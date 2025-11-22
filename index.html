@@ -52,7 +52,10 @@
         const STARTING_MONEY = 50000;
         const REGION_COST = 10000;
         const TURN_INCOME = 5000;
-        const ACTIVE_TIMEOUT = 15000; // 15 sn ses yoksa offline
+        
+        // YENİ ZAMAN AYARLARI (Daha Hızlı Tepki)
+        const ACTIVE_TIMEOUT = 7000; // 7 saniye ses yoksa offline say
+        const HEARTBEAT_INTERVAL = 2000; // 2 saniyede bir "ben buradayım" de
 
         const Icon = ({p, s=20, c=""}) => <svg xmlns="http://www.w3.org/2000/svg" width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={c}>{p}</svg>;
         
@@ -138,8 +141,8 @@
                 return () => unsub();
             }, [user, roomCode]);
 
-            // --- HEARTBEAT (KALP ATIŞI) SİSTEMİ ---
-            // Her 5 saniyede bir "ben buradayım" diye damga basar.
+            // --- HIZLANDIRILMIŞ HEARTBEAT ---
+            // Her 2 saniyede bir güncelleme gönderir.
             useEffect(() => {
                 if(!user || !roomCode || !roomData) return;
                 
@@ -147,7 +150,7 @@
                     updateDoc(doc(db, 'rooms', roomCode), {
                         [`players.${user.uid}.lastActive`]: Date.now()
                     }).catch(e => console.log("Heartbeat fail", e));
-                }, 5000);
+                }, HEARTBEAT_INTERVAL);
 
                 return () => clearInterval(interval);
             }, [user, roomCode, roomData]);
@@ -180,7 +183,7 @@
                             color: COLORS[0], 
                             money: STARTING_MONEY, 
                             ready: true,
-                            lastActive: Date.now() // İlk giriş damgası
+                            lastActive: Date.now()
                         } 
                     },
                     chat: [], gameData: {}
@@ -287,35 +290,25 @@
             const selectedEl = selectedId ? document.getElementById(selectedId) : null;
             const regionName = selectedEl ? selectedEl.getAttribute('data-name') : "Seçilmedi";
 
-            // Zamanı güncelle (Çevrimdışı kontrolü için)
+            // Zamanı güncelle (Daha sık kontrol için 1sn'ye çekildi)
             useEffect(() => {
-                const t = setInterval(() => setNow(Date.now()), 5000);
+                const t = setInterval(() => setNow(Date.now()), 1000);
                 return () => clearInterval(t);
             }, []);
 
-            // --- AUTO-SKIP (OTOMATİK SIRA ATLAMA) ---
-            // Eğer sıra birindeyse VE o kişi çevrimdışıysa -> Sırayı atla
+            // --- AUTO-SKIP (OTOMATİK SIRA ATLAMA - 7sn) ---
             useEffect(() => {
                 if (roomData.status === 'playing' && currentPlayerId) {
                     const currentPlayer = roomData.players[currentPlayerId];
                     if (currentPlayer) {
                         const isOffline = (now - (currentPlayer.lastActive || 0)) > ACTIVE_TIMEOUT;
                         
-                        // Sadece Host veya sıradaki kişi değilse (güvenlik için herkes denemesin)
-                        // Aslında sadece Host veya sıradaki online kişi tetiklemeli.
-                        // Basitlik için: Sadece "ben" (client) bu durumu fark ettiğimde ve sıradaki ben değilsem...
-                        // Çakışmayı önlemek için: Sadece Host bu kararı versin (eğer host online ise).
-                        // Veya daha basit: Herkes bu kontrolü yapar, ilk yazan kazanır.
-                        
-                        // Eğer sıradaki kişi çevrimdışıysa ve ben de oyundaysam,
-                        // ve son güncelleme üzerinden biraz vakit geçtiyse (spam olmasın)
                         if (isOffline) {
-                            // Sırayı bir sonrakine geçir
-                            // Not: Sonsuz döngü olmaması için (herkes offline ise), bunu bir debounce ile yapmak lazım.
-                            // Şimdilik basit bir nextTurn yapalım.
-                            // Ama bunu sadece bir kişi yapmalı. Mesela Host.
+                            // Sadece HOST olan kişi bu atlamayı tetikler (Çakışma olmasın diye)
+                            // Eğer HOST da offline ise (veya yoksa), o zaman sıradaki canlı oyuncu tetikler.
+                            // Şimdilik basitçe: "Ben oyundaysam ve sıradaki kişi ölüyse" mantığı yeterli.
                             if (isHost) {
-                                console.log("Oyuncu çevrimdışı, sıra atlanıyor:", currentPlayer.name);
+                                console.log("Oyuncu çevrimdışı (7sn), sıra atlanıyor:", currentPlayer.name);
                                 const nextIdx = (roomData.turnIndex + 1) % roomData.turnOrder.length;
                                 updateDoc(doc(db, 'rooms', roomCode), { turnIndex: nextIdx });
                             }
@@ -500,7 +493,7 @@
                                     const p = roomData.players[uid];
                                     if (!p) return null;
                                     const isActive = uid === currentPlayerId;
-                                    // AKTİFLİK KONTROLÜ
+                                    // AKTİFLİK KONTROLÜ (7 saniye)
                                     const isOffline = (now - (p.lastActive || 0)) > ACTIVE_TIMEOUT;
 
                                     return (
