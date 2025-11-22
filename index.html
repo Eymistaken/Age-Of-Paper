@@ -94,13 +94,7 @@
 
             useEffect(() => {
                 const unsub = onAuthStateChanged(auth, (u) => {
-                    if (u) {
-                        setUser(u);
-                        // --- ID'Yİ KONSOLA YAZDIRMA KODU ---
-                        console.log("%c SENİN ID NUMARAN AŞAĞIDA:", "color: yellow; font-size: 20px; font-weight: bold;");
-                        console.log("%c" + u.uid, "color: lime; font-size: 24px; font-weight: bold; background: #333; padding: 5px;");
-                        // -----------------------------------
-                    }
+                    if (u) setUser(u);
                     else signInAnonymously(auth).catch(e => setError("Giriş Hatası: " + e.message));
                 });
                 return () => unsub();
@@ -254,18 +248,14 @@
             const handleWheel = (e) => {
                 const factor = e.deltaY > 0 ? 0.9 : 1.1;
                 const newScale = Math.max(0.5, Math.min(20, scale * factor));
-                
                 const rect = e.currentTarget.getBoundingClientRect();
                 const mouseX = e.clientX - rect.left;
                 const mouseY = e.clientY - rect.top;
-                
                 const worldX = (mouseX - pos.x) / scale;
                 const worldY = (mouseY - pos.y) / scale;
-                
-                const newX = mouseX - worldX * newScale;
-                const newY = mouseY - worldY * newScale;
-
-                setPos({x: newX, y: newY});
+                const nx = mouseX - worldX * newScale;
+                const ny = mouseY - worldY * newScale;
+                setPos({x: nx, y: ny});
                 setScale(newScale);
             };
 
@@ -421,7 +411,6 @@
                                 {roomData.chat?.map((m, i) => (
                                     <div key={i} className="text-sm"><span style={{color: m.c}} className="font-bold text-xs block">{m.s}</span><span className="text-gray-300 bg-gray-700/50 px-2 py-1 rounded inline-block max-w-full break-words">{m.t}</span></div>
                                 ))}
-                                {/* OTOMATİK SCROLL İÇİN GÖRÜNMEZ DİV */}
                                 <div ref={chatEndRef} />
                             </div>
                             <form onSubmit={sendMessage} className="p-2 bg-gray-800 border-t border-gray-700 flex gap-2">
