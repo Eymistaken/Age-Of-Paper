@@ -204,13 +204,30 @@
             const currentPlayerId = roomData.status === 'playing' ? roomData.turnOrder[roomData.turnIndex] : null;
             const isMyTurn = currentPlayerId === user.uid;
             
-            // Seçili bölge adı
             const selectedEl = selectedId ? document.getElementById(selectedId) : null;
             const regionName = selectedEl ? selectedEl.getAttribute('data-name') : "Seçilmedi";
 
+            // MERKEZİ ZOOM (CENTER ZOOM)
             const handleWheel = (e) => {
                 const factor = e.deltaY > 0 ? 0.9 : 1.1;
                 const newScale = Math.max(0.5, Math.min(10, scale * factor));
+                
+                // Container boyutları
+                const rect = e.currentTarget.getBoundingClientRect();
+                
+                // Ekranın tam ortası (Zoom Merkezi)
+                const cx = rect.width / 2;
+                const cy = rect.height / 2;
+                
+                // Merkezin dünya koordinatlarındaki karşılığı (Bu nokta sabit kalmalı)
+                const wx = (cx - pos.x) / scale;
+                const wy = (cy - pos.y) / scale;
+                
+                // Yeni scale ile merkezin yeni konumu
+                const nx = cx - wx * newScale;
+                const ny = cy - wy * newScale;
+
+                setPos({x: nx, y: ny});
                 setScale(newScale);
             };
 
@@ -228,53 +245,26 @@
                 await updateDoc(doc(db, 'rooms', roomCode), { status: 'playing', turnOrder: shuffled, turnIndex: 0 });
             };
 
-            // --- YENİ: SINIR KONTROLÜ FONKSİYONU ---
             const checkAdjacency = (targetId) => {
-                // 1. Benim topraklarım
-                const myLandIds = Object.entries(roomData.gameData || {})
-                    .filter(([_, data]) => data.owner === user.uid)
-                    .map(([id]) => id);
-
-                // 2. Hiç toprağım yoksa (İlk hamle) -> Her yer serbest
+                const myLandIds = Object.entries(roomData.gameData || {}).filter(([_, data]) => data.owner === user.uid).map(([id]) => id);
                 if (myLandIds.length === 0) return true;
-
-                // 3. Hedef ve Kaynak Bölgelerin Fiziksel Konumlarını Karşılaştır
                 const targetEl = document.getElementById(targetId);
                 if (!targetEl) return false;
                 const tRect = targetEl.getBoundingClientRect();
-
-                // Tolerans: Deniz aşırı yakınlıklar için (örn: 50px)
                 const tolerance = 50;
-
-                // Benim topraklarımdan HERHANGİ BİRİ, hedefe yakın mı?
                 return myLandIds.some(landId => {
                     const landEl = document.getElementById(landId);
                     if (!landEl) return false;
                     const lRect = landEl.getBoundingClientRect();
-
-                    // Basit çarpışma (intersection) testi + tolerans
-                    return !(
-                        tRect.right + tolerance < lRect.left || 
-                        tRect.left - tolerance > lRect.right || 
-                        tRect.bottom + tolerance < lRect.top || 
-                        tRect.top - tolerance > lRect.bottom
-                    );
+                    return !(tRect.right + tolerance < lRect.left || tRect.left - tolerance > lRect.right || tRect.bottom + tolerance < lRect.top || tRect.top - tolerance > lRect.bottom);
                 });
             };
 
             const buyRegion = async () => {
                 if(!isMyTurn || !selectedId) return;
-                
-                // KURAL 1: Zaten sahipli mi?
                 if(roomData.gameData[selectedId]?.owner) return alert("Bu bölge zaten birine ait!");
-
-                // KURAL 2: Para yetiyor mu?
                 if(me.money < REGION_COST) return alert("Yetersiz Bakiye!");
-
-                // KURAL 3: Sınır Komşusu mu?
-                if (!checkAdjacency(selectedId)) {
-                    return alert("Sadece sınır komşusu olan bölgeleri satın alabilirsin! (İlk bölge hariç)");
-                }
+                if (!checkAdjacency(selectedId)) return alert("Sadece sınır komşusu olan bölgeleri satın alabilirsin! (İlk bölge hariç)");
 
                 await updateDoc(doc(db, 'rooms', roomCode), {
                     [`gameData.${selectedId}`]: { owner: user.uid, color: me.color },
@@ -299,7 +289,6 @@
                 setMsg('');
             };
 
-            // SVG İŞLEME & İSİM DÜZELTME
             useEffect(() => {
                 if(svgRef.current && roomData.mapSvg) {
                     const paths = svgRef.current.querySelectorAll('path, polygon, circle');
@@ -310,17 +299,12 @@
                             p.setAttribute('id', id); 
                         }
                         
-                        // --- İSİM DÜZELTME (Fix) ---
-                        // Önce kalıcı isme (data-original-name) bak, yoksa oluştur ve kaydet.
-                        // Böylece sonraki renderlarda class silinse bile isim hafızada kalır.
                         let displayName = p.getAttribute('data-original-name');
                         if (!displayName) {
-                            // İlk okuma: Name veya Class'tan al
                             const rawName = p.getAttribute('name') || p.getAttribute('class') || id;
                             displayName = rawName.replace(/default-land/g, '').replace(/_/g, ' ').trim() || "Bölge " + idx;
                             p.setAttribute('data-original-name', displayName);
                         }
-                        // UI için kullanılan attribute
                         p.setAttribute('data-name', displayName);
 
                         const region = roomData.gameData[id];
@@ -338,7 +322,6 @@
             if (roomData.status === 'lobby') {
                 return (
                     <div className="h-screen flex flex-col items-center justify-center bg-gray-900 text-white relative">
-                        {/* KOPYALAMA BUTONU LOBİYE EKLENDİ */}
                         <div className="absolute top-4 left-4 bg-gray-800 px-4 py-2 rounded-lg flex items-center gap-3 border border-gray-700 shadow-lg">
                             <span className="text-gray-400 text-sm">ODA:</span>
                             <span className="text-yellow-500 font-bold text-xl tracking-widest">{roomCode}</span>
