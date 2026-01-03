@@ -1,0 +1,94 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Yardımcı Fonksiyonlar
+    function isPlayer(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function isTurnOwner() {
+      // Turn Index sınırlarını kontrol et ve sıranın oyuncuda olduğunu doğrula
+      return resource.data.turnOrder.size() > 0 &&
+             resource.data.turnIndex >= 0 &&
+             resource.data.turnIndex < resource.data.turnOrder.size() &&
+             resource.data.turnOrder[resource.data.turnIndex] == request.auth.uid;
+    }
+
+    match /rooms/{roomCode} {
+      allow read: if request.auth != null;
+
+      allow create: if request.auth != null
+                    && request.resource.data.hostId == request.auth.uid
+                    && request.resource.data.players[request.auth.uid].money == 0; // Başlangıç parası 0 olmalı
+
+      allow update: if request.auth != null && (
+
+        // 1. OYUNCU VERİSİ İZOLASYONU
+        // Sadece kendi player verisini değiştirebilir.
+        // players map'inde değişen key'lerin hepsi (hasOnly) kullanıcının kendi UID'si olmalı.
+        request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([request.auth.uid])
+
+        && (
+          // 2. GELİR KONTROLÜ (MONEY INCREASE)
+          // Para artıyorsa:
+          // a. Tur sırası değişmiş olmalı (Gelir sadece tur pas geçildiğinde kazanılır)
+          // b. Artış miktarı makul bir üst sınırı geçmemeli (Döngü ile hesaplama yapılamadığı için hard-cap)
+          (request.resource.data.players[request.auth.uid].money > resource.data.players[request.auth.uid].money)
+          ? (
+              request.resource.data.turnIndex != resource.data.turnIndex &&
+              (request.resource.data.players[request.auth.uid].money - resource.data.players[request.auth.uid].money) <= 50000
+            )
+          : true
+        )
+
+        && (
+          // 3. HARCAMA TUTARLILIĞI (MONEY DECREASE)
+          // Para azalıyorsa, oyun durumunda geçerli bir değişiklik olmalı.
+          (resource.data.players[request.auth.uid].money > request.resource.data.players[request.auth.uid].money)
+          ? (
+              // Değişken tanımları (Rules içinde let kullanımı kısıtlıdır, inline yapıyoruz)
+
+              // DURUM A: Asker Üretimi (Cost: 10,000 -> Reserve: +1000)
+              (
+                (resource.data.players[request.auth.uid].money - request.resource.data.players[request.auth.uid].money) == 10000 &&
+                request.resource.data.players[request.auth.uid].reserve == resource.data.players[request.auth.uid].reserve + 1000
+              )
+
+              ||
+
+              // DURUM B: Liman İnşası (Cost: 90,000 -> GameData değişmeli)
+              // Liman verisi gameData içinde olduğu için gameData'nın değiştiğini kontrol ediyoruz.
+              (
+                (resource.data.players[request.auth.uid].money - request.resource.data.players[request.auth.uid].money) == 90000 &&
+                request.resource.data.gameData != resource.data.gameData
+              )
+
+              ||
+
+              // DURUM C: Toprak Satın Alma (Cost: X -> GameData değişmeli)
+              // Asker üretimi veya Liman değilse, toprak satın alımıdır. GameData değişmelidir.
+              // Not: Firestore Rules'da map içinde hangi key'in değiştiğini bulup o key'in value'sunu
+              // okuyarak matematiksel doğrulama yapmak (Set indexing kısıtı yüzünden) mümkün değildir.
+              // Bu yüzden en azından "Para gittiyse karşılığında harita değişmeli" kuralını işletiyoruz.
+              (
+                request.resource.data.gameData != resource.data.gameData
+              )
+            )
+          : true
+        )
+
+        && (
+          // 4. OYUN YAPISI VE SIRA KONTROLÜ
+          // Eğer harita (gameData) üzerinde bir değişiklik varsa,
+          // bunu yapan kişi sıradaki oyuncu (Turn Owner) olmalıdır.
+          (request.resource.data.gameData != resource.data.gameData)
+          ? isTurnOwner()
+          : true
+        )
+      );
+
+      allow delete: if request.auth != null && resource.data.hostId == request.auth.uid;
+    }
+  }
+}
