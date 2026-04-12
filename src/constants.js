@@ -1,0 +1,9 @@
+export const COLORS = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B'];
+export const MAX_PLAYERS = 4;
+export const STARTING_MONEY = 0;
+export const PORT_COST = 90000;
+export const SOLDIER_COST = 10000;
+export const SOLDIER_BATCH = 1000;
+export const BASE_INCOME = 5000;
+export const ACTIVE_TIMEOUT = 7000; 
+export const HEARTBEAT_INTERVAL = 2000;
