@@ -126,8 +126,8 @@ export const MapViewer = ({
 
                 const region = roomData.gameData[id];
                 p.setAttribute('class', 'default-land');
-                p.style.fill = region ? region.color : '#4a5568';
-                p.style.stroke = '#2d3748';
+                p.style.fill = region ? region.color : '#b7a370';
+                p.style.stroke = '#282316';
                 
                 if (id === selectedId) { 
                     p.classList.add('selected-land'); 
@@ -169,7 +169,9 @@ export const MapViewer = ({
                             g.appendChild(textP);
                         }
                         p.parentNode.appendChild(g);
-                    } catch(e) {}
+                    } catch {
+                        console.warn("Bölge etiketi yerleştirilemedi:", id);
+                    }
                 }
             });
         }
@@ -177,7 +179,7 @@ export const MapViewer = ({
 
     return (
         <div 
-            className="flex-1 relative bg-[#1a202c] overflow-hidden cursor-grab active:cursor-grabbing touch-none" 
+            className="flex-1 relative aop-map-surface overflow-hidden cursor-grab active:cursor-grabbing touch-none" 
             onMouseDown={e => { if(e.button===0) handlePointerDown(e.clientX, e.clientY) }} 
             onMouseMove={e => handlePointerMove(e.clientX, e.clientY)} 
             onMouseUp={() => setDragging(false)} 
@@ -198,27 +200,27 @@ export const MapViewer = ({
                 className="w-full h-full absolute top-0 left-0"
             >
                 {roomData.mapSvg && (
-                    <div ref={svgRef} dangerouslySetInnerHTML={{__html: roomData.mapSvg}} className="w-full h-full"/>
+                    <div ref={svgRef} dangerouslySetInnerHTML={{__html: roomData.mapSvg}} className="w-full h-full [&>svg]:w-full [&>svg]:h-full"/>
                 )}
             </div>
 
-            {/* Overlays */}
-            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 glass-panel px-4 md:px-6 py-2 rounded-full flex items-center gap-4 md:gap-6 shadow-lg z-10 scale-90 md:scale-100">
+            <div className="absolute top-3 md:top-4 left-1/2 transform -translate-x-1/2 bg-[var(--aop-panel)] border-2 border-[var(--aop-bronze)] px-3 md:px-5 py-2 rounded flex items-center gap-3 md:gap-5 z-10 scale-90 md:scale-100">
                 <div className="flex items-center gap-2 font-bold text-lg md:text-xl">
-                    <span className="text-yellow-500">{roomCode}</span>
+                    <span className="aop-label hidden sm:inline">Oda</span>
+                    <span className="aop-serif text-[var(--aop-paper-light)]">{roomCode}</span>
                     <CopyBtn code={roomCode} />
                 </div>
-                <div className="w-px h-6 bg-gray-600"></div>
-                <div className="text-xs md:text-sm text-gray-300">
-                    Tur: <span className="text-white font-bold">{roomData.turnIndex + 1}</span>
+                <div className="w-px h-6 bg-[var(--aop-line)]"></div>
+                <div className="text-xs md:text-sm text-[var(--aop-muted)]">
+                    Tur: <span className="text-[var(--aop-paper-light)] font-bold">{roomData.turnIndex + 1}</span>
                 </div>
-                <button onClick={leaveRoom} className="text-red-400 hover:text-red-300">
+                <button onClick={leaveRoom} className="text-[var(--aop-danger)] hover:text-[var(--aop-paper-light)]">
                     <Icon p={Icons.LogOut}/>
                 </button>
             </div>
             <button 
                 onClick={resetApp} 
-                className="absolute bottom-4 left-4 text-xs text-gray-600 hover:text-red-400 flex items-center gap-1 z-50 bg-gray-800/50 px-2 py-1 rounded"
+                className="absolute bottom-4 left-4 text-xs text-[var(--aop-muted)] hover:text-[var(--aop-gold)] flex items-center gap-1 z-50 bg-[var(--aop-panel)] border border-[var(--aop-line)] px-2 py-1 rounded"
             >
                 <Icon p={Icons.Trash} s={12}/> Sıfırla
             </button>

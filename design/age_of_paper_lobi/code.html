@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Age of Paper - Game Lobby</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Text:ital,wght@0,400;0,700;1,400&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&amp;family=Work+Sans:ital,wght@0,100..900;1,100..900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-container": "#b2a172",
+                        "on-secondary-container": "#d7ae77",
+                        "background": "#15130f",
+                        "on-secondary-fixed-variant": "#5e4114",
+                        "surface-container-lowest": "#100e0a",
+                        "outline-variant": "#4e4637",
+                        "tertiary-fixed": "#f5e1ad",
+                        "outline": "#9b8f7d",
+                        "on-background": "#e8e1da",
+                        "inverse-on-surface": "#33302b",
+                        "secondary-fixed-dim": "#eac087",
+                        "on-tertiary-container": "#433812",
+                        "on-primary": "#412d00",
+                        "surface": "#15130f",
+                        "secondary-fixed": "#ffddb3",
+                        "primary": "#f0bf5c",
+                        "secondary-container": "#5e4114",
+                        "primary-fixed": "#ffdea4",
+                        "secondary": "#eac087",
+                        "surface-container-highest": "#373430",
+                        "primary-container": "#c89b3c",
+                        "surface-bright": "#3c3934",
+                        "error-container": "#93000a",
+                        "surface-container-high": "#2c2a25",
+                        "on-tertiary-fixed-variant": "#52461f",
+                        "surface-container": "#221f1b",
+                        "on-error-container": "#ffdad6",
+                        "on-secondary-fixed": "#291800",
+                        "on-surface": "#e8e1da",
+                        "tertiary-fixed-dim": "#d8c593",
+                        "on-error": "#690005",
+                        "on-tertiary": "#3a2f0b",
+                        "error": "#ffb4ab",
+                        "surface-dim": "#15130f",
+                        "on-primary-fixed-variant": "#5d4200",
+                        "inverse-surface": "#e8e1da",
+                        "surface-container-low": "#1d1b17",
+                        "on-surface-variant": "#d2c5b1",
+                        "on-primary-container": "#4b3500",
+                        "on-primary-fixed": "#261900",
+                        "tertiary": "#d8c593",
+                        "on-tertiary-fixed": "#231b00",
+                        "on-secondary": "#442b01",
+                        "inverse-primary": "#7b5900",
+                        "surface-tint": "#f0bf5c",
+                        "primary-fixed-dim": "#f0bf5c",
+                        "surface-variant": "#373430"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "margin-mobile": "16px",
+                        "unit": "8px",
+                        "margin-desktop": "40px",
+                        "panel-padding": "24px",
+                        "gutter": "24px"
+                    },
+                    "fontFamily": {
+                        "body-lg": ["Work Sans"],
+                        "display-lg": ["Libre Caslon Text"],
+                        "label-caps": ["\"Source Serif 4\""],
+                        "body-md": ["Work Sans"],
+                        "headline-lg-mobile": ["Libre Caslon Text"],
+                        "headline-md": ["Libre Caslon Text"],
+                        "headline-lg": ["Libre Caslon Text"],
+                        "stats-num": ["Work Sans"]
+                    },
+                    "fontSize": {
+                        "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                        "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "label-caps": ["14px", {"lineHeight": "20px", "letterSpacing": "0.1em", "fontWeight": "600"}],
+                        "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                        "headline-lg-mobile": ["24px", {"lineHeight": "32px", "fontWeight": "700"}],
+                        "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                        "headline-lg": ["32px", {"lineHeight": "40px", "fontWeight": "700"}],
+                        "stats-num": ["20px", {"lineHeight": "24px", "fontWeight": "600"}]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .parchment-texture {
+            background-color: #CDBB8A;
+            background-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"%3E%3Cfilter id="noise"%3E%3CfeTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="3" stitchTiles="stitch"/%3E%3C/filter%3E%3Crect width="100" height="100" filter="url(%23noise)" opacity="0.05"/%3E%3C/svg%3E');
+            color: #242016;
+        }
+        .wood-texture {
+            background-color: #15130F;
+            background-image: linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
+                              linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        .wax-seal {
+            background-color: #9E2F2F;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.5), 0 2px 4px rgba(0,0,0,0.3);
+            border: 2px solid #5A1B1B;
+        }
+        .wax-seal.gold {
+            background-color: #c89b3c;
+            border-color: #8c6a26;
+        }
+        .bronze-border {
+            border: 1px solid #7A5A2B;
+        }
+        .bronze-border-2 {
+            border: 2px solid #7A5A2B;
+        }
+        .bronze-text {
+            color: #7A5A2B;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="wood-texture min-h-screen text-on-background font-body-md selection:bg-primary-container selection:text-on-primary-container">
+<!-- Top Navigation (Shell) -->
+<header class="bg-background dark:bg-background border-b-2 border-outline-variant w-full px-margin-mobile md:px-margin-desktop py-unit flex justify-between items-center z-50 sticky top-0">
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-primary dark:text-primary" style="font-variation-settings: 'FILL' 1;">room_service</span>
+<h1 class="text-headline-md font-headline-md text-primary dark:text-primary uppercase tracking-widest">Age of Paper</h1>
+</div>
+<button class="text-label-caps font-label-caps text-on-surface hover:bg-secondary-container dark:hover:bg-secondary-container transition-colors px-4 py-2 rounded">
+            LEAVE TABLE
+        </button>
+</header>
+<main class="max-w-5xl mx-auto px-margin-mobile md:px-margin-desktop py-8 md:py-12">
+<!-- Lobby Header -->
+<div class="text-center mb-12 flex flex-col items-center">
+<h2 class="text-display-lg font-display-lg text-primary mb-4">War Room</h2>
+<div class="flex items-center justify-center gap-3 bg-surface-container px-6 py-3 rounded-lg bronze-border-2">
+<span class="text-on-surface-variant font-label-caps text-label-caps uppercase tracking-widest">Room Code:</span>
+<span class="text-headline-md font-headline-md text-tertiary-fixed tracking-widest">XJ-42</span>
+<button class="ml-2 hover:text-primary transition-colors" title="Copy Code">
+<span class="material-symbols-outlined text-[20px]">content_copy</span>
+</button>
+</div>
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+<!-- Player Roster Panel -->
+<div class="lg:col-span-8 bg-[#242016] bronze-border rounded-lg p-panel-padding relative overflow-hidden">
+<!-- Decorative Corner Accents -->
+<div class="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-outline-variant m-2"></div>
+<div class="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-outline-variant m-2"></div>
+<div class="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-outline-variant m-2"></div>
+<div class="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-outline-variant m-2"></div>
+<div class="flex justify-between items-end mb-6 pb-2 border-b border-outline-variant">
+<h3 class="text-headline-md font-headline-md text-primary">Commanders Assembled</h3>
+<span class="text-label-caps font-label-caps text-on-surface-variant">3 / 6 Players</span>
+</div>
+<div class="space-y-4">
+<!-- Player 1 (Host) -->
+<div class="parchment-texture p-4 rounded bronze-border flex items-center justify-between relative group hover:brightness-95 transition-all">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-full wax-seal flex items-center justify-center">
+<span class="material-symbols-outlined text-white text-[24px]">swords</span>
+</div>
+<div>
+<h4 class="text-headline-md-mobile font-headline-md-mobile font-bold text-[#15130F]">General Hawthorne</h4>
+<div class="flex items-center gap-2 mt-1">
+<span class="w-3 h-3 rounded-full bg-[#1e40af] border border-[#15130F]"></span>
+<span class="text-label-caps font-label-caps text-[#4e4637]">Prussian Blue</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<div class="bg-[#15130F] text-primary px-3 py-1 rounded text-label-caps font-label-caps border border-[#7A5A2B]">HOST</div>
+<span class="material-symbols-outlined text-[#15130F]" title="Ready">check_circle</span>
+</div>
+</div>
+<!-- Player 2 -->
+<div class="parchment-texture p-4 rounded bronze-border flex items-center justify-between relative group hover:brightness-95 transition-all">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-full wax-seal gold flex items-center justify-center">
+<span class="material-symbols-outlined text-white text-[24px]">shield</span>
+</div>
+<div>
+<h4 class="text-headline-md-mobile font-headline-md-mobile font-bold text-[#15130F]">Lord Blackwood</h4>
+<div class="flex items-center gap-2 mt-1">
+<span class="w-3 h-3 rounded-full bg-[#b91c1c] border border-[#15130F]"></span>
+<span class="text-label-caps font-label-caps text-[#4e4637]">Crimson Red</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="text-label-caps font-label-caps text-[#4e4637] italic">Waiting...</span>
+<span class="material-symbols-outlined text-[#7A5A2B]" title="Not Ready">pending</span>
+</div>
+</div>
+<!-- Player 3 -->
+<div class="parchment-texture p-4 rounded bronze-border flex items-center justify-between relative group hover:brightness-95 transition-all">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-full wax-seal flex items-center justify-center bg-[#242016]">
+<span class="material-symbols-outlined text-[#CDBB8A] text-[24px]">account_balance</span>
+</div>
+<div>
+<h4 class="text-headline-md-mobile font-headline-md-mobile font-bold text-[#15130F]">Lady Sterling</h4>
+<div class="flex items-center gap-2 mt-1">
+<span class="w-3 h-3 rounded-full bg-[#047857] border border-[#15130F]"></span>
+<span class="text-label-caps font-label-caps text-[#4e4637]">Forest Green</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[#15130F]" title="Ready">check_circle</span>
+</div>
+</div>
+<!-- Empty Slot -->
+<div class="border-2 border-dashed border-outline-variant p-4 rounded flex items-center justify-center bg-[#1a1813] h-20 opacity-60">
+<span class="text-on-surface-variant font-label-caps text-label-caps tracking-widest flex items-center gap-2">
+<span class="material-symbols-outlined">add</span> AWAITING COMMANDER
+                        </span>
+</div>
+</div>
+</div>
+<!-- Settings & Actions Panel -->
+<div class="lg:col-span-4 flex flex-col gap-6">
+<!-- Map Settings -->
+<div class="bg-[#242016] bronze-border rounded-lg p-panel-padding">
+<h3 class="text-headline-md font-headline-md text-primary mb-4 border-b border-outline-variant pb-2">Campaign Details</h3>
+<div class="space-y-4">
+<div>
+<label class="text-label-caps font-label-caps text-on-surface-variant block mb-1">Selected Theater</label>
+<div class="bg-[#15130F] p-3 border-b-2 border-outline-variant text-on-surface flex items-center justify-between">
+<span>The Continental Divide</span>
+<span class="material-symbols-outlined text-outline">map</span>
+</div>
+</div>
+<div>
+<label class="text-label-caps font-label-caps text-on-surface-variant block mb-1">Turn Timer</label>
+<div class="bg-[#15130F] p-3 border-b-2 border-outline-variant text-on-surface flex items-center justify-between">
+<span>48 Hours</span>
+<span class="material-symbols-outlined text-outline">hourglass_empty</span>
+</div>
+</div>
+<div>
+<label class="text-label-caps font-label-caps text-on-surface-variant block mb-1">Diplomacy Mode</label>
+<div class="bg-[#15130F] p-3 border-b-2 border-outline-variant text-on-surface flex items-center justify-between">
+<span>Secret Letters</span>
+<span class="material-symbols-outlined text-outline">mail</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Action Buttons -->
+<div class="mt-auto space-y-4">
+<button class="w-full bg-[#242016] bronze-border-2 text-primary font-headline-md text-headline-md py-4 hover:bg-[#33302b] transition-colors uppercase tracking-widest relative overflow-hidden group">
+<div class="absolute inset-0 bg-primary opacity-0 group-hover:opacity-10 transition-opacity"></div>
+                        Load Map
+                    </button>
+<button class="w-full bg-primary-container border-2 border-[#8c6a26] text-on-primary-container font-headline-md text-headline-md py-4 hover:brightness-110 transition-all uppercase tracking-widest shadow-lg flex justify-center items-center gap-2">
+<span class="material-symbols-outlined">play_arrow</span>
+                        Start Game
+                    </button>
+</div>
+</div>
+</div>
+</main>
+</body></html>

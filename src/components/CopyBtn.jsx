@@ -13,11 +13,11 @@ export const CopyBtn = ({ code }) => {
     return (
         <button 
             onClick={handleCopy} 
-            className="text-gray-400 hover:text-white transition flex items-center gap-2" 
+            className="text-[var(--aop-muted)] hover:text-[var(--aop-gold)] transition flex items-center gap-2 min-w-4" 
             title="Kodu Kopyala"
         >
             {copied ? (
-                <span className="text-green-500 font-bold text-xs animate-pulse">KOPYALANDI!</span>
+                <span className="text-[var(--aop-success)] font-bold text-xs">Kopyalandı</span>
             ) : (
                 <Icon p={Icons.Copy} s={16}/>
             )}

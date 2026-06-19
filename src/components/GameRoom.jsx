@@ -31,7 +31,7 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
 
     const currentIncome = useMemo(() => {
         let totalValue = 0;
-        const myLandIds = Object.entries(roomData.gameData || {}).filter(([_, data]) => data.owner === user.uid).map(([id]) => id);
+        const myLandIds = Object.entries(roomData.gameData || {}).filter(([, data]) => data.owner === user.uid).map(([id]) => id);
         
         myLandIds.forEach(id => {
             if(roomData.gameData[id].value) {
@@ -43,7 +43,9 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
                         const bbox = el.getBBox();
                         let price = (bbox.width * bbox.height) / 15 + 4000;
                         totalValue += Math.ceil(price / 100) * 100;
-                    } catch(e) {}
+                    } catch {
+                        console.warn("Bölge sınırları okunamadı:", id);
+                    }
                 }
             }
         });
@@ -77,7 +79,9 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
                      if (Math.random() < 0.1) {
                          // Fallback logic
                         const nextIdx = (roomData.turnIndex + 1) % roomData.turnOrder.length;
-                        updateDoc(doc(db, 'rooms', roomCode), { turnIndex: nextIdx }).catch(()=>{});
+                        updateDoc(doc(db, 'rooms', roomCode), { turnIndex: nextIdx }).catch((err) => {
+                            console.warn("Sıra atlama başarısız:", err);
+                        });
                      }
                 }
             }
@@ -101,7 +105,7 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
                 let rawPrice = (bbox.width * bbox.height) / 15 + 4000;
                 const finalPrice = Math.ceil(rawPrice / 100) * 100;
                 setSelectedCost(finalPrice);
-            } catch (e) {
+            } catch {
                 setSelectedCost(10000);
             }
         }
@@ -118,7 +122,7 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     };
 
     const checkAdjacency = (targetId) => {
-        const myLandIds = Object.entries(roomData.gameData || {}).filter(([_, data]) => data.owner === user.uid).map(([id]) => id);
+        const myLandIds = Object.entries(roomData.gameData || {}).filter(([, data]) => data.owner === user.uid).map(([id]) => id);
         if (myLandIds.length === 0) return true;
         return myLandIds.some(landId => isAdjacent(targetId, landId));
     };
@@ -220,7 +224,7 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     };
 
     return (
-        <div className="flex flex-col md:flex-row h-screen w-full overflow-hidden bg-gray-900">
+        <div className="flex flex-col md:flex-row h-screen w-full overflow-hidden aop-desk">
             <LeftPanel 
                 roomData={roomData}
                 currentPlayerId={currentPlayerId}
@@ -256,7 +260,6 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
                 attack={attack}
                 trainSoldiers={trainSoldiers}
                 passTurn={passTurn}
-                user={user}
             />
         </div>
     );

@@ -1,4 +1,4 @@
-export const COLORS = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B'];
+export const COLORS = ['#2F6FA3', '#A33A32', '#4F7A45', '#C89B3C'];
 export const MAX_PLAYERS = 4;
 export const STARTING_MONEY = 0;
 export const PORT_COST = 90000;

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Age of Paper - Strategy Map</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Text:wght@400;700&amp;family=Work+Sans:wght@400;600&amp;family=Source+Serif+4:opsz,wght@8..60,600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-container": "#b2a172",
+                        "on-secondary-container": "#d7ae77",
+                        "background": "#15130f",
+                        "on-secondary-fixed-variant": "#5e4114",
+                        "surface-container-lowest": "#100e0a",
+                        "outline-variant": "#4e4637",
+                        "tertiary-fixed": "#f5e1ad",
+                        "outline": "#9b8f7d",
+                        "on-background": "#e8e1da",
+                        "inverse-on-surface": "#33302b",
+                        "secondary-fixed-dim": "#eac087",
+                        "on-tertiary-container": "#433812",
+                        "on-primary": "#412d00",
+                        "surface": "#15130f",
+                        "secondary-fixed": "#ffddb3",
+                        "primary": "#f0bf5c",
+                        "secondary-container": "#5e4114",
+                        "primary-fixed": "#ffdea4",
+                        "secondary": "#eac087",
+                        "surface-container-highest": "#373430",
+                        "primary-container": "#c89b3c",
+                        "surface-bright": "#3c3934",
+                        "error-container": "#93000a",
+                        "surface-container-high": "#2c2a25",
+                        "on-tertiary-fixed-variant": "#52461f",
+                        "surface-container": "#221f1b",
+                        "on-error-container": "#ffdad6",
+                        "on-secondary-fixed": "#291800",
+                        "on-surface": "#e8e1da",
+                        "tertiary-fixed-dim": "#d8c593",
+                        "on-error": "#690005",
+                        "on-tertiary": "#3a2f0b",
+                        "error": "#ffb4ab",
+                        "surface-dim": "#15130f",
+                        "on-primary-fixed-variant": "#5d4200",
+                        "inverse-surface": "#e8e1da",
+                        "surface-container-low": "#1d1b17",
+                        "on-surface-variant": "#d2c5b1",
+                        "on-primary-container": "#4b3500",
+                        "on-primary-fixed": "#261900",
+                        "tertiary": "#d8c593",
+                        "on-tertiary-fixed": "#231b00",
+                        "on-secondary": "#442b01",
+                        "inverse-primary": "#7b5900",
+                        "surface-tint": "#f0bf5c",
+                        "primary-fixed-dim": "#f0bf5c",
+                        "surface-variant": "#373430"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "margin-mobile": "16px",
+                        "unit": "8px",
+                        "margin-desktop": "40px",
+                        "panel-padding": "24px",
+                        "gutter": "24px"
+                    },
+                    "fontFamily": {
+                        "body-lg": ["Work Sans"],
+                        "display-lg": ["Libre Caslon Text"],
+                        "label-caps": ["\"Source Serif 4\""],
+                        "body-md": ["Work Sans"],
+                        "headline-lg-mobile": ["Libre Caslon Text"],
+                        "headline-md": ["Libre Caslon Text"],
+                        "headline-lg": ["Libre Caslon Text"],
+                        "stats-num": ["Work Sans"]
+                    },
+                    "fontSize": {
+                        "body-lg": ["18px", { "lineHeight": "28px", "fontWeight": "400" }],
+                        "display-lg": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "label-caps": ["14px", { "lineHeight": "20px", "letterSpacing": "0.1em", "fontWeight": "600" }],
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "headline-lg-mobile": ["24px", { "lineHeight": "32px", "fontWeight": "700" }],
+                        "headline-md": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+                        "headline-lg": ["32px", { "lineHeight": "40px", "fontWeight": "700" }],
+                        "stats-num": ["20px", { "lineHeight": "24px", "fontWeight": "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: #15130f; overflow: hidden; }
+        .parchment-texture { background-color: #CDBB8A; background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100' height='100' filter='url(%23noise)' opacity='0.08'/%3E%3C/svg%3E"); }
+        .bronze-border { border: 2px solid #7A5A2B; }
+        .bronze-border-bottom { border-bottom: 2px solid #7A5A2B; }
+        .bronze-border-right { border-right: 2px solid #7A5A2B; }
+        .panel-bg { background-color: #242016; }
+        .wax-seal { background-color: #9E2F2F; border: 1px solid #5e1c1c; box-shadow: inset 0 2px 4px rgba(0,0,0,0.3), 0 2px 4px rgba(0,0,0,0.5); }
+        .wax-seal-gold { background-color: #C89B3C; border: 1px solid #7a5a2b; box-shadow: inset 0 2px 4px rgba(0,0,0,0.3), 0 2px 4px rgba(0,0,0,0.5); }
+        .ink-line { border-bottom: 1px solid #9C9275; opacity: 0.5; }
+        .map-region-blue { fill: #2F6FA3; fill-opacity: 0.8; stroke: #242016; stroke-width: 2; }
+        .map-region-red { fill: #A33A32; fill-opacity: 0.8; stroke: #242016; stroke-width: 2; }
+        .map-region-unclaimed { fill: transparent; stroke: #242016; stroke-width: 2; stroke-dasharray: 4; }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="flex flex-col h-screen text-on-surface">
+<!-- TopAppBar -->
+<header class="flex justify-between items-center w-full px-margin-mobile md:px-margin-desktop py-unit bg-background text-primary border-b-2 border-outline-variant docked full-width top-0 z-50">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-headline-md font-headline-md text-primary">room_service</span>
+<div class="text-headline-md font-headline-md text-primary uppercase tracking-widest">Current Turn: Player X</div>
+</div>
+<div>
+<button class="text-label-caps font-label-caps text-primary hover:bg-secondary-container transition-colors px-4 py-2 rounded scale-95 duration-150 border border-outline">LEAVE TABLE</button>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden relative">
+<!-- Central Map Area -->
+<main class="flex-1 relative parchment-texture">
+<!-- Simulated SVG Map -->
+<svg class="w-full h-full absolute inset-0" preserveaspectratio="xMidYMid slice" viewbox="0 0 1000 800">
+<!-- Water background implied by parchment -->
+<!-- Continents / Regions -->
+<path class="map-region-blue" d="M 100,200 C 150,150 250,180 300,250 C 350,320 280,400 200,450 C 120,500 50,400 80,300 Z"></path>
+<path class="map-region-red" d="M 400,150 C 500,100 600,200 650,300 C 700,400 550,450 480,380 C 410,310 350,250 400,150 Z"></path>
+<path class="map-region-unclaimed" d="M 700,500 C 800,450 900,550 850,650 C 800,750 650,700 680,600 C 710,500 650,550 700,500 Z"></path>
+<!-- Region Labels -->
+<text fill="#15130f" font-family="Libre Caslon Text" font-size="24" font-weight="bold" x="180" y="320">Aethelgard</text>
+<text fill="#15130f" font-family="Libre Caslon Text" font-size="24" font-weight="bold" x="500" y="280">Crimson Reach</text>
+<text fill="#15130f" font-family="Libre Caslon Text" font-size="24" opacity="0.6" x="750" y="600">The Wilds</text>
+<!-- Map Decor -->
+<circle cx="850" cy="150" fill="transparent" r="40" stroke="#242016" stroke-width="2"></circle>
+<path d="M 850,110 L 850,190 M 810,150 L 890,150" stroke="#242016" stroke-width="2"></path>
+</svg>
+</main>
+<!-- Right Side Overlay - Selected Province Info -->
+<aside class="absolute right-margin-desktop top-margin-desktop w-80 panel-bg bronze-border p-panel-padding shadow-[8px_8px_0px_#15130f]">
+<h2 class="text-headline-md font-headline-md text-primary mb-2 border-b border-outline-variant pb-2">Aethelgard</h2>
+<div class="flex items-center justify-between mb-6">
+<span class="text-body-md font-body-md text-on-surface-variant">Garrison</span>
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 rounded-full wax-seal flex items-center justify-center">
+<span class="material-symbols-outlined text-on-surface text-sm">swords</span>
+</div>
+<span class="text-stats-num font-stats-num text-on-surface">15,000</span>
+</div>
+</div>
+<div class="space-y-4">
+<button class="w-full py-3 parchment-texture text-on-primary font-label-caps text-label-caps uppercase bronze-border hover:brightness-90 transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined">directions_run</span> Move Army
+                </button>
+<button class="w-full py-3 parchment-texture text-on-primary font-label-caps text-label-caps uppercase bronze-border hover:brightness-90 transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined">anchor</span> Access Port
+                </button>
+</div>
+<div class="mt-6 pt-4 border-t border-outline-variant ink-line">
+<p class="text-body-md font-body-md text-on-surface-variant text-sm italic">"The northern winds favor a defensive stance."</p>
+</div>
+</aside>
+<!-- BottomNavBar (Mobile Only / Tablet, hidden on large desktop if using sidebar, but requested in JSON) -->
+<nav class="fixed bottom-0 w-full z-50 flex justify-around items-center px-4 py-2 bg-surface-container border-t-2 border-outline md:hidden">
+<div class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined">directions_run</span>
+<span class="text-label-caps font-label-caps">Moves</span>
+</div>
+<div class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined">payments</span>
+<span class="text-label-caps font-label-caps">Income</span>
+</div>
+<div class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined">anchor</span>
+<span class="text-label-caps font-label-caps">Port</span>
+</div>
+<div class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined">swords</span>
+<span class="text-label-caps font-label-caps">Attack</span>
+</div>
+</nav>
+<!-- Navigation Drawer (Left Side, acting as Commander Profile overlay) -->
+<nav class="hidden md:flex flex-col w-80 bg-surface-container-low border-r-2 border-outline h-full z-40 p-panel-padding absolute left-0 top-0 transition-all duration-300 ease-in-out shadow-[8px_0_16px_rgba(0,0,0,0.5)]">
+<!-- Profile Header -->
+<div class="mb-8 flex flex-col items-start gap-4 pb-4 border-b border-outline-variant">
+<div class="w-16 h-16 rounded-full border-2 border-primary overflow-hidden relative">
+<div class="bg-cover bg-center w-full h-full" data-alt="A portrait of a serious, weathered military commander from the 19th century in a somber, tactical war room setting. Painted style, oil on canvas aesthetic, dark mahogany and brass lighting tones. Intense expression, wearing a tailored uniform with subtle gold trim. Somber, strategic mood." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBrr7K7q4Tcgrq01Ro50OJPSW5BsN6SRi9C-J4C4oFzkrBuKWe0anSK094fSx4ixLNGFcfNDrmp6eTQ06ukuXQFI7gHszyl29chWBIEKqn5vT3E53IAWaVggteF746y94l2GUz9KNbBpiT8W7A3bhVFmRaBTmq-4ofi_rarUNG5jkRCLdBGjZqr5opJbRW2gDozP8naDoTjDfbusloPs-XW3eHuhE2x7TztPvIHF31MhpXk1pFTVFBFWF4um3ffg0RnmScV127T2_c')"></div>
+</div>
+<div>
+<h2 class="text-headline-md font-headline-md text-primary">Commander</h2>
+<div class="flex items-center gap-2 mt-1">
+<span class="material-symbols-outlined text-secondary text-sm">payments</span>
+<span class="text-body-md font-body-md text-secondary">Gold: 1,250</span>
+</div>
+<span class="text-body-md font-body-md text-on-surface-variant text-sm block mt-1">Online</span>
+</div>
+</div>
+<!-- Navigation Links -->
+<div class="flex-1 space-y-4">
+<div class="flex items-center gap-3 text-on-surface-variant pl-4 hover:bg-tertiary-container hover:text-on-tertiary-container py-2 cursor-pointer transition-colors">
+<span class="material-symbols-outlined">chat</span>
+<span class="text-body-md font-body-md">Tactical Chat</span>
+</div>
+<div class="flex items-center gap-3 text-on-surface-variant pl-4 hover:bg-tertiary-container hover:text-on-tertiary-container py-2 cursor-pointer transition-colors">
+<span class="material-symbols-outlined">menu_book</span>
+<span class="text-body-md font-body-md">Ledger</span>
+</div>
+<div class="flex items-center gap-3 text-primary font-bold border-l-4 border-primary pl-4 py-2 cursor-pointer bg-surface-container-highest">
+<span class="material-symbols-outlined">handshake</span>
+<span class="text-body-md font-body-md">Diplomacy</span>
+</div>
+</div>
+<!-- Mini Chat Preview -->
+<div class="mt-auto pt-4 border-t border-outline-variant">
+<h3 class="text-label-caps font-label-caps text-on-surface-variant mb-2 uppercase">Recent Intel</h3>
+<div class="bg-background p-3 border border-outline-variant text-sm font-body-md text-on-surface space-y-2 h-32 overflow-y-auto">
+<p><span class="text-primary">[Ally]:</span> Enemy fleet spotted near Crimson Reach.</p>
+<p><span class="text-error">[System]:</span> Port blockaded.</p>
+</div>
+</div>
+</nav>
+</div>
+</body></html>

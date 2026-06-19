@@ -142,9 +142,10 @@ function App() {
 
     if (!user) {
         return (
-            <div className="h-screen flex flex-col items-center justify-center text-yellow-500 bg-gray-900">
-                <div className="mb-4">Bağlanıyor...</div>
-                <button onClick={resetApp} className="text-xs border border-gray-700 px-2 py-1 rounded text-gray-500">
+            <div className="h-screen flex flex-col items-center justify-center text-[var(--aop-gold)] aop-desk">
+                <div className="aop-title text-3xl mb-2">Age of Paper</div>
+                <div className="mb-4 text-[var(--aop-muted)]">Savaş masasına bağlanıyor...</div>
+                <button onClick={resetApp} className="aop-button-secondary text-xs px-3 py-2 rounded">
                     Sıfırla
                 </button>
             </div>
