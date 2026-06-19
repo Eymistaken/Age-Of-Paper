@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ACTIVE_TIMEOUT } from '../constants';
 import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
@@ -40,6 +40,14 @@ export const MobileGameRoom = ({
 }) => {
     const [activeTab, setActiveTab] = useState('orders');
     const [isExpanded, setIsExpanded] = useState(false);
+    const [isDraggingSheet, setIsDraggingSheet] = useState(false);
+    const [dragHeight, setDragHeight] = useState(null);
+    const isDraggingSheetRef = useRef(false);
+    const dragStartYRef = useRef(0);
+    const dragStartHeightRef = useRef(0);
+    const dragHeightRef = useRef(null);
+    const dragMovedRef = useRef(false);
+    const dragBoundsRef = useRef({ collapsed: 250, expanded: 560 });
 
     const currentPlayer = currentPlayerId ? roomData.players[currentPlayerId] : null;
     const selectedData = selectedId ? roomData.gameData[selectedId] : null;
@@ -56,6 +64,69 @@ export const MobileGameRoom = ({
     const selectTab = (tabId) => {
         setActiveTab(tabId);
         setIsExpanded(true);
+    };
+
+    const getSheetBounds = () => {
+        const viewportHeight = window.innerHeight || 800;
+        return {
+            collapsed: Math.max(250, Math.min(viewportHeight * 0.38, 360)),
+            expanded: Math.min(viewportHeight * 0.72, 640),
+        };
+    };
+
+    const getCurrentSheetHeight = () => {
+        const bounds = getSheetBounds();
+        return isExpanded ? bounds.expanded : bounds.collapsed;
+    };
+
+    const startSheetDrag = (event) => {
+        const bounds = getSheetBounds();
+        dragBoundsRef.current = bounds;
+        dragStartYRef.current = event.clientY;
+        dragStartHeightRef.current = getCurrentSheetHeight();
+        dragHeightRef.current = dragStartHeightRef.current;
+        dragMovedRef.current = false;
+        isDraggingSheetRef.current = true;
+        setIsDraggingSheet(true);
+        setDragHeight(dragStartHeightRef.current);
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+    };
+
+    const moveSheetDrag = (event) => {
+        if (!isDraggingSheetRef.current) return;
+
+        const delta = dragStartYRef.current - event.clientY;
+        const bounds = dragBoundsRef.current;
+        const nextHeight = Math.min(
+            bounds.expanded,
+            Math.max(bounds.collapsed, dragStartHeightRef.current + delta)
+        );
+
+        if (Math.abs(delta) > 6) dragMovedRef.current = true;
+        dragHeightRef.current = nextHeight;
+        setDragHeight(nextHeight);
+    };
+
+    const endSheetDrag = (event) => {
+        if (!isDraggingSheetRef.current) return;
+
+        const bounds = dragBoundsRef.current;
+        const currentHeight = dragHeightRef.current ?? getCurrentSheetHeight();
+        const midpoint = bounds.collapsed + (bounds.expanded - bounds.collapsed) * 0.45;
+
+        setIsExpanded(dragMovedRef.current ? currentHeight >= midpoint : value => !value);
+        isDraggingSheetRef.current = false;
+        setIsDraggingSheet(false);
+        dragHeightRef.current = null;
+        setDragHeight(null);
+        if (event?.currentTarget?.hasPointerCapture?.(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+    };
+
+    const runAndCollapseOnSuccess = async (action) => {
+        const didRun = await action();
+        if (didRun) setIsExpanded(false);
     };
 
     return (
@@ -95,11 +166,17 @@ export const MobileGameRoom = ({
                 </div>
             </header>
 
-            <section className={`aop-mobile-sheet ${isExpanded ? 'is-expanded' : ''}`}>
+            <section
+                className={`aop-mobile-sheet ${isExpanded ? 'is-expanded' : ''} ${isDraggingSheet ? 'is-dragging' : ''}`}
+                style={dragHeight ? { height: `${dragHeight}px` } : undefined}
+            >
                 <button
                     type="button"
                     className="aop-mobile-grip"
-                    onClick={() => setIsExpanded(value => !value)}
+                    onPointerDown={startSheetDrag}
+                    onPointerMove={moveSheetDrag}
+                    onPointerUp={endSheetDrag}
+                    onPointerCancel={endSheetDrag}
                     aria-label={isExpanded ? 'Komut panelini küçült' : 'Komut panelini büyüt'}
                 >
                     <span></span>
@@ -141,6 +218,7 @@ export const MobileGameRoom = ({
                             attack={attack}
                             trainSoldiers={trainSoldiers}
                             passTurn={passTurn}
+                            runAndCollapseOnSuccess={runAndCollapseOnSuccess}
                             resetApp={resetApp}
                         />
                     )}
@@ -184,6 +262,7 @@ const MobileOrders = ({
     attack,
     trainSoldiers,
     passTurn,
+    runAndCollapseOnSuccess,
     resetApp,
 }) => (
     <div className="space-y-3">
@@ -215,7 +294,7 @@ const MobileOrders = ({
             selectedData?.owner ? (
                 <div className="aop-mobile-note danger">Bu bölge zaten sahipli.</div>
             ) : (
-                <button onClick={buyRegion} className="aop-action aop-action-success aop-mobile-action">
+                <button onClick={() => runAndCollapseOnSuccess(buyRegion)} className="aop-action aop-action-success aop-mobile-action">
                     Satın Al
                     <span>{selectedCost.toLocaleString()} altın</span>
                 </button>
@@ -240,8 +319,8 @@ const MobileOrders = ({
         {isMyTurn && selectedId && roomData.isWar && isOwnedByEnemy && (
             attackSource ? (
                 <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => attack('LAND')} className="aop-action aop-action-danger aop-mobile-action">Kara Hücumu</button>
-                    <button onClick={() => attack('SEA')} className="aop-action aop-action-port aop-mobile-action">Deniz Hücumu</button>
+                    <button onClick={() => runAndCollapseOnSuccess(() => attack('LAND'))} className="aop-action aop-action-danger aop-mobile-action">Kara Hücumu</button>
+                    <button onClick={() => runAndCollapseOnSuccess(() => attack('SEA'))} className="aop-action aop-action-port aop-mobile-action">Deniz Hücumu</button>
                 </div>
             ) : (
                 <div className="aop-mobile-note">Önce kendi bölgeni hücum üssü yap.</div>
@@ -256,7 +335,7 @@ const MobileOrders = ({
         )}
 
         {isMyTurn && (
-            <button onClick={passTurn} className="aop-button aop-mobile-action">
+            <button onClick={() => runAndCollapseOnSuccess(passTurn)} className="aop-button aop-mobile-action">
                 Pas Geç
                 <span>+{currentIncome.toLocaleString()} altın</span>
             </button>

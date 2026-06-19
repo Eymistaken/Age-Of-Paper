@@ -144,10 +144,19 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     };
 
     const buyRegion = async () => {
-        if(!isMyTurn || !selectedId) return;
-        if(roomData.gameData[selectedId]?.owner) return alert("Sahipli bölge!");
-        if(me.money < selectedCost) return alert(`Yetersiz Bakiye!`);
-        if (!checkAdjacency(selectedId)) return alert("Sınır komşusu gerekli!");
+        if(!isMyTurn || !selectedId) return false;
+        if(roomData.gameData[selectedId]?.owner) {
+            alert("Sahipli bölge!");
+            return false;
+        }
+        if(me.money < selectedCost) {
+            alert(`Yetersiz Bakiye!`);
+            return false;
+        }
+        if (!checkAdjacency(selectedId)) {
+            alert("Sınır komşusu gerekli!");
+            return false;
+        }
 
         await updateDoc(doc(db, 'rooms', roomCode), {
             [`gameData.${selectedId}`]: { owner: user.uid, color: me.color, soldiers: 0, hasPort: false, value: selectedCost },
@@ -155,55 +164,81 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
             turnIndex: (roomData.turnIndex + 1) % roomData.turnOrder.length
         });
         setSelectedId(null);
+        return true;
     };
 
     const passTurn = async () => {
-        if(!isMyTurn) return;
+        if(!isMyTurn) return false;
         await updateDoc(doc(db, 'rooms', roomCode), {
             [`players.${user.uid}.money`]: increment(currentIncome),
             turnIndex: (roomData.turnIndex + 1) % roomData.turnOrder.length
         });
+        return true;
     };
 
     const trainSoldiers = async () => {
-        if(me.money < SOLDIER_COST) return alert("Yetersiz para!");
+        if(me.money < SOLDIER_COST) {
+            alert("Yetersiz para!");
+            return false;
+        }
         await updateDoc(doc(db, 'rooms', roomCode), {
             [`players.${user.uid}.money`]: increment(-SOLDIER_COST),
             [`players.${user.uid}.reserve`]: increment(SOLDIER_BATCH)
         });
+        return true;
     };
 
     const deploySoldiers = async () => {
-        if(!isMyTurn || !selectedId || !isOwnedByMe) return;
-        if(me.reserve < SOLDIER_BATCH) return alert("Rezervde asker yok! Önce eğit.");
+        if(!isMyTurn || !selectedId || !isOwnedByMe) return false;
+        if(me.reserve < SOLDIER_BATCH) {
+            alert("Rezervde asker yok! Önce eğit.");
+            return false;
+        }
         await updateDoc(doc(db, 'rooms', roomCode), {
             [`players.${user.uid}.reserve`]: increment(-SOLDIER_BATCH),
             [`gameData.${selectedId}.soldiers`]: increment(SOLDIER_BATCH)
         });
+        return true;
     };
 
     const buildPort = async () => {
-        if(!isMyTurn || !selectedId || !isOwnedByMe) return;
-        if(me.money < PORT_COST) return alert("Liman için 90.000$ lazım!");
+        if(!isMyTurn || !selectedId || !isOwnedByMe) return false;
+        if(me.money < PORT_COST) {
+            alert("Liman için 90.000$ lazım!");
+            return false;
+        }
         await updateDoc(doc(db, 'rooms', roomCode), {
             [`players.${user.uid}.money`]: increment(-PORT_COST),
             [`gameData.${selectedId}.hasPort`]: true
         });
+        return true;
     };
 
     const attack = async (type) => {
-        if(!isMyTurn || !selectedId || !isOwnedByEnemy || !attackSource) return alert("Kaynak seçilmedi!");
+        if(!isMyTurn || !selectedId || !isOwnedByEnemy || !attackSource) {
+            alert("Kaynak seçilmedi!");
+            return false;
+        }
         
         const sourceData = roomData.gameData[attackSource];
         const targetData = roomData.gameData[selectedId];
         const attackAmount = sourceData.soldiers;
 
-        if(attackAmount <= 0) return alert("Saldıracak asker yok!");
+        if(attackAmount <= 0) {
+            alert("Saldıracak asker yok!");
+            return false;
+        }
 
         if (type === 'LAND') {
-            if(!isAdjacent(attackSource, selectedId)) return alert("Kara saldırısı için sınır komşusu olmalı!");
+            if(!isAdjacent(attackSource, selectedId)) {
+                alert("Kara saldırısı için sınır komşusu olmalı!");
+                return false;
+            }
         } else if (type === 'SEA') {
-            if(!sourceData.hasPort) return alert("Deniz saldırısı için kaynak şehirde Liman olmalı!");
+            if(!sourceData.hasPort) {
+                alert("Deniz saldırısı için kaynak şehirde Liman olmalı!");
+                return false;
+            }
         }
 
         const defenderAmount = targetData.soldiers || 0;
@@ -230,6 +265,7 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
         }
         setSelectedId(null);
         setAttackSource(null);
+        return true;
     };
 
     const sendMessage = async (e) => {

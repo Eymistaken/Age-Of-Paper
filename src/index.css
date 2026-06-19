@@ -367,12 +367,17 @@
   border-radius: 16px 16px 0 0;
   background: rgba(34, 32, 25, 0.98);
   box-shadow: 0 -12px 28px rgba(10, 9, 6, 0.46);
-  transition: height 220ms ease-out;
+  transition: height 340ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 240ms ease-out;
   touch-action: pan-y;
+  will-change: height;
 }
 
 .aop-mobile-sheet.is-expanded {
   height: min(72dvh, 640px);
+}
+
+.aop-mobile-sheet.is-dragging {
+  transition: none;
 }
 
 .aop-mobile-grip {
@@ -380,6 +385,8 @@
   min-height: 22px;
   align-items: center;
   justify-content: center;
+  touch-action: none;
+  user-select: none;
 }
 
 .aop-mobile-grip span {
@@ -388,6 +395,7 @@
   height: 5px;
   border-radius: 9999px;
   background: var(--aop-line);
+  pointer-events: none;
 }
 
 .aop-mobile-tabs {
