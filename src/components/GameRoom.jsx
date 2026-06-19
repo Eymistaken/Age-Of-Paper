@@ -4,6 +4,7 @@ import { doc, updateDoc, arrayUnion, increment } from 'firebase/firestore';
 import { LeftPanel } from './SidePanels/LeftPanel';
 import { RightPanel } from './SidePanels/RightPanel';
 import { MapViewer } from './MapViewer';
+import { MobileGameRoom } from './MobileGameRoom';
 import { 
     BASE_INCOME, 
     ACTIVE_TIMEOUT, 
@@ -18,6 +19,9 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     const [msg, setMsg] = useState('');
     const [now, setNow] = useState(Date.now());
     const [attackSource, setAttackSource] = useState(null);
+    const [isMobileViewport, setIsMobileViewport] = useState(() => (
+        typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+    ));
     const chatEndRef = useRef(null);
 
     const isHost = roomData.hostId === user.uid;
@@ -68,6 +72,18 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     useEffect(() => {
         const t = setInterval(() => setNow(Date.now()), 1000);
         return () => clearInterval(t);
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        const media = window.matchMedia('(max-width: 767px)');
+        const updateViewport = () => setIsMobileViewport(media.matches);
+
+        updateViewport();
+        media.addEventListener('change', updateViewport);
+
+        return () => media.removeEventListener('change', updateViewport);
     }, []);
 
     useEffect(() => {
@@ -222,6 +238,39 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
         await updateDoc(doc(db, 'rooms', roomCode), { chat: arrayUnion({ s: me.name, c: me.color, t: msg }) });
         setMsg('');
     };
+
+    if (isMobileViewport) {
+        return (
+            <MobileGameRoom
+                roomData={roomData}
+                roomCode={roomCode}
+                selectedId={selectedId}
+                setSelectedId={setSelectedId}
+                leaveRoom={leaveRoom}
+                resetApp={resetApp}
+                currentPlayerId={currentPlayerId}
+                now={now}
+                msg={msg}
+                setMsg={setMsg}
+                sendMessage={sendMessage}
+                chatEndRef={chatEndRef}
+                currentIncome={currentIncome}
+                isMyTurn={isMyTurn}
+                regionName={regionName}
+                selectedCost={selectedCost}
+                isOwnedByMe={isOwnedByMe}
+                isOwnedByEnemy={isOwnedByEnemy}
+                buyRegion={buyRegion}
+                deploySoldiers={deploySoldiers}
+                buildPort={buildPort}
+                setAttackSource={setAttackSource}
+                attackSource={attackSource}
+                attack={attack}
+                trainSoldiers={trainSoldiers}
+                passTurn={passTurn}
+            />
+        );
+    }
 
     return (
         <div className="flex flex-col md:flex-row h-screen w-full overflow-hidden aop-desk">

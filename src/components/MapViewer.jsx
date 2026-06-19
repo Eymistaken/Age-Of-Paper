@@ -8,7 +8,9 @@ export const MapViewer = ({
     selectedId,
     setSelectedId,
     leaveRoom,
-    resetApp
+    resetApp,
+    hideHud = false,
+    className = ""
 }) => {
     // Zoom & Pan States
     const [scale, setScale] = useState(1);
@@ -179,7 +181,7 @@ export const MapViewer = ({
 
     return (
         <div 
-            className="flex-1 relative aop-map-surface overflow-hidden cursor-grab active:cursor-grabbing touch-none" 
+            className={`flex-1 relative aop-map-surface overflow-hidden cursor-grab active:cursor-grabbing touch-none ${className}`}
             onMouseDown={e => { if(e.button===0) handlePointerDown(e.clientX, e.clientY) }} 
             onMouseMove={e => handlePointerMove(e.clientX, e.clientY)} 
             onMouseUp={() => setDragging(false)} 
@@ -204,26 +206,30 @@ export const MapViewer = ({
                 )}
             </div>
 
-            <div className="absolute top-3 md:top-4 left-1/2 transform -translate-x-1/2 bg-[var(--aop-panel)] border-2 border-[var(--aop-bronze)] px-3 md:px-5 py-2 rounded flex items-center gap-3 md:gap-5 z-10 scale-90 md:scale-100">
-                <div className="flex items-center gap-2 font-bold text-lg md:text-xl">
-                    <span className="aop-label hidden sm:inline">Oda</span>
-                    <span className="aop-serif text-[var(--aop-paper-light)]">{roomCode}</span>
-                    <CopyBtn code={roomCode} />
-                </div>
-                <div className="w-px h-6 bg-[var(--aop-line)]"></div>
-                <div className="text-xs md:text-sm text-[var(--aop-muted)]">
-                    Tur: <span className="text-[var(--aop-paper-light)] font-bold">{roomData.turnIndex + 1}</span>
-                </div>
-                <button onClick={leaveRoom} className="text-[var(--aop-danger)] hover:text-[var(--aop-paper-light)]">
-                    <Icon p={Icons.LogOut}/>
-                </button>
-            </div>
-            <button 
-                onClick={resetApp} 
-                className="absolute bottom-4 left-4 text-xs text-[var(--aop-muted)] hover:text-[var(--aop-gold)] flex items-center gap-1 z-50 bg-[var(--aop-panel)] border border-[var(--aop-line)] px-2 py-1 rounded"
-            >
-                <Icon p={Icons.Trash} s={12}/> Sıfırla
-            </button>
+            {!hideHud && (
+                <>
+                    <div className="absolute top-3 md:top-4 left-1/2 transform -translate-x-1/2 bg-[var(--aop-panel)] border-2 border-[var(--aop-bronze)] px-3 md:px-5 py-2 rounded flex items-center gap-3 md:gap-5 z-10 scale-90 md:scale-100">
+                        <div className="flex items-center gap-2 font-bold text-lg md:text-xl">
+                            <span className="aop-label hidden sm:inline">Oda</span>
+                            <span className="aop-serif text-[var(--aop-paper-light)]">{roomCode}</span>
+                            <CopyBtn code={roomCode} />
+                        </div>
+                        <div className="w-px h-6 bg-[var(--aop-line)]"></div>
+                        <div className="text-xs md:text-sm text-[var(--aop-muted)]">
+                            Tur: <span className="text-[var(--aop-paper-light)] font-bold">{roomData.turnIndex + 1}</span>
+                        </div>
+                        <button onClick={leaveRoom} className="text-[var(--aop-danger)] hover:text-[var(--aop-paper-light)]">
+                            <Icon p={Icons.LogOut}/>
+                        </button>
+                    </div>
+                    <button 
+                        onClick={resetApp} 
+                        className="absolute bottom-4 left-4 text-xs text-[var(--aop-muted)] hover:text-[var(--aop-gold)] flex items-center gap-1 z-50 bg-[var(--aop-panel)] border border-[var(--aop-line)] px-2 py-1 rounded"
+                    >
+                        <Icon p={Icons.Trash} s={12}/> Sıfırla
+                    </button>
+                </>
+            )}
         </div>
     );
 };
