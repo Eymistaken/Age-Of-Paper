@@ -12,6 +12,8 @@ import {
   CHAT_HISTORY_LIMIT,
   CHAT_MESSAGE_LIMIT,
   COLORS,
+  JOIN_REQUEST_TTL,
+  MAX_JOIN_REQUESTS,
   MAX_PLAYERS,
   OFFLINE_SKIP_TIMEOUT,
   ROOM_CODE_LENGTH,
@@ -22,6 +24,15 @@ import { PHASES } from '../game/phases';
 import { applyClaim, releasePlayerClaims } from '../game/rules';
 import { advanceTurn, getActivePlayerId, removePlayerFromTurnState } from '../game/turns';
 import { validateMapDefinition } from '../game/mapValidation';
+import {
+  JOIN_REQUEST_STATUS,
+  acceptJoinRequestState,
+  castJoinVote,
+  createJoinRequestRecord,
+  getJoinVoteSummary,
+  isJoinRequestExpired,
+  pickAvailablePlayerColor,
+} from '../game/joinRequests';
 
 const ROOM_COLLECTION = 'rooms';
 
@@ -37,7 +48,7 @@ function roomRef(roomCode) {
   return doc(db, ROOM_COLLECTION, roomCode);
 }
 
-function cleanNickname(nickname) {
+export function cleanNickname(nickname) {
   return String(nickname || '').trim().slice(0, 32);
 }
 
@@ -59,6 +70,26 @@ function makePlayer(userId, nickname, color, joinedAt = Timestamp.now()) {
     lastActive: Timestamp.now(),
     lastIncomeTurn: 0,
   };
+}
+
+function joinRequestAction(type, actorId, requesterId) {
+  return { type, actorId, requesterId, at: Timestamp.now() };
+}
+
+function assertRequestCanStart(room, userId) {
+  if (room.phase !== PHASES.CLAIMING) {
+    throw new GameActionError('Toprak edinme tamamlandığı için yeni katılma isteği alınmıyor.', 'JOIN_REQUEST_CLOSED');
+  }
+  if (Object.keys(room.players || {}).length >= MAX_PLAYERS) throw new GameActionError('Oda dolu.', 'ROOM_FULL');
+  if (!room.mapDefinition?.regionIds?.some((id) => !room.claims?.[id]?.ownerId)) {
+    throw new GameActionError('Alınabilecek tarafsız bölge kalmadı.', 'NO_NEUTRAL_REGION');
+  }
+  const ownRequest = room.joinRequests?.[userId];
+  if (ownRequest?.status === JOIN_REQUEST_STATUS.PENDING && !isJoinRequestExpired(ownRequest)) return ownRequest;
+  if (!(userId in (room.joinRequests || {})) && Object.keys(room.joinRequests || {}).length >= MAX_JOIN_REQUESTS) {
+    throw new GameActionError('Bu oda çok fazla eski katılma kaydı içeriyor.', 'JOIN_REQUEST_LIMIT');
+  }
+  return null;
 }
 
 function randomRoomCode() {
@@ -110,6 +141,8 @@ export async function createRoom(userId, nickname) {
           claims: {},
           chat: [],
           lastAction: null,
+          joinRequests: {},
+          joinRequestAction: null,
         });
       });
       return code;
@@ -124,22 +157,176 @@ export async function joinRoom(roomCode, userId, nickname) {
   const code = String(roomCode || '').trim().toUpperCase();
   if (!cleanNickname(nickname) || !code) throw new GameActionError('Komutan adı ve oda kodu gerekli.', 'INVALID_JOIN');
 
-  await runTransaction(db, async (transaction) => {
+  return runTransaction(db, async (transaction) => {
     const reference = roomRef(code);
     const snapshot = await transaction.get(reference);
     if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
     const room = snapshot.data();
-    if (room.phase !== PHASES.LOBBY) throw new GameActionError('Oyun başladıktan sonra odaya katılınamaz.', 'ROOM_STARTED');
-    if (room.players?.[userId]) return;
+    if (room.players?.[userId]) return { code, mode: 'joined' };
     const players = room.players || {};
-    if (Object.keys(players).length >= MAX_PLAYERS) throw new GameActionError('Oda dolu.', 'ROOM_FULL');
-    const usedColors = new Set(Object.values(players).map((player) => player.color));
-    const color = COLORS.find((candidate) => !usedColors.has(candidate)) || COLORS[Object.keys(players).length % COLORS.length];
+    if (room.phase === PHASES.LOBBY) {
+      if (Object.keys(players).length >= MAX_PLAYERS) throw new GameActionError('Oda dolu.', 'ROOM_FULL');
+      const color = pickAvailablePlayerColor(players);
+      if (!color) throw new GameActionError('Kullanılabilir komutan rengi kalmadı.', 'NO_PLAYER_COLOR');
+      transaction.update(reference, {
+        players: { ...players, [userId]: makePlayer(userId, nickname, color) },
+      });
+      return { code, mode: 'joined' };
+    }
+
+    const existingRequest = assertRequestCanStart(room, userId);
+    if (existingRequest) return { code, mode: 'requested', request: existingRequest };
+    const createdAt = Timestamp.now();
+    const expiresAt = Timestamp.fromMillis(createdAt.toMillis() + JOIN_REQUEST_TTL);
+    const request = createJoinRequestRecord(room, userId, cleanNickname(nickname), createdAt, expiresAt);
     transaction.update(reference, {
-      players: { ...players, [userId]: makePlayer(userId, nickname, color) },
+      joinRequests: { ...(room.joinRequests || {}), [userId]: request },
+      joinRequestAction: joinRequestAction('create', userId, userId),
+    });
+    return { code, mode: 'requested', request };
+  });
+}
+
+export async function voteJoinRequest(roomCode, voterId, requesterId, vote) {
+  const result = await runTransaction(db, async (transaction) => {
+    const reference = roomRef(roomCode);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
+    const room = snapshot.data();
+    const request = room.joinRequests?.[requesterId];
+    if (isJoinRequestExpired(request)) throw new GameActionError('Katılma isteğinin süresi doldu.', 'REQUEST_EXPIRED');
+    let next;
+    try {
+      next = castJoinVote(room, requesterId, voterId, vote, Timestamp.now());
+    } catch (error) {
+      throw new GameActionError(error.message, 'INVALID_JOIN_VOTE');
+    }
+    transaction.update(reference, {
+      joinRequests: next.joinRequests,
+      joinRequestAction: joinRequestAction(vote, voterId, requesterId),
+    });
+    return getJoinVoteSummary(next, next.joinRequests[requesterId]).unanimous;
+  });
+  if (result && vote === 'approve') {
+    try {
+      await acceptJoinRequest(roomCode, voterId, requesterId);
+    } catch (error) {
+      if (!['JOIN_CONDITIONS', 'REQUEST_NOT_PENDING'].includes(error?.code)) throw error;
+    }
+  }
+  return result;
+}
+
+export async function acceptJoinRequest(roomCode, actorId, requesterId) {
+  return runTransaction(db, async (transaction) => {
+    const reference = roomRef(roomCode);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
+    const room = snapshot.data();
+    const request = room.joinRequests?.[requesterId];
+    if (!request || request.status !== JOIN_REQUEST_STATUS.PENDING) {
+      throw new GameActionError('Katılma isteği artık beklemede değil.', 'REQUEST_NOT_PENDING');
+    }
+    let next;
+    const now = Timestamp.now();
+    try {
+      next = acceptJoinRequestState(room, requesterId, actorId, now, (pending, color) => (
+        makePlayer(pending.uid, pending.name, color, now)
+      ));
+    } catch (error) {
+      throw new GameActionError(error.message, 'JOIN_CONDITIONS');
+    }
+    transaction.update(reference, {
+      players: next.players,
+      turnOrder: next.turnOrder,
+      joinRequests: next.joinRequests,
+      joinRequestAction: joinRequestAction('accept', actorId, requesterId),
+    });
+    return true;
+  });
+}
+
+export async function rejectJoinRequest(roomCode, hostId, requesterId) {
+  return runTransaction(db, async (transaction) => {
+    const reference = roomRef(roomCode);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
+    const room = snapshot.data();
+    const request = room.joinRequests?.[requesterId];
+    if (room.hostId !== hostId) throw new GameActionError('İsteği yalnızca güncel kurucu kapatabilir.', 'HOST_ONLY');
+    if (!request || request.status !== JOIN_REQUEST_STATUS.PENDING) throw new GameActionError('İstek artık beklemede değil.', 'REQUEST_NOT_PENDING');
+    const now = Timestamp.now();
+    transaction.update(reference, {
+      joinRequests: {
+        ...room.joinRequests,
+        [requesterId]: { ...request, status: JOIN_REQUEST_STATUS.REJECTED, updatedAt: now, decisionAt: now, decidedBy: hostId },
+      },
+      joinRequestAction: joinRequestAction('reject_request', hostId, requesterId),
     });
   });
-  return code;
+}
+
+export async function cancelJoinRequest(roomCode, requesterId) {
+  return runTransaction(db, async (transaction) => {
+    const reference = roomRef(roomCode);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) return false;
+    const room = snapshot.data();
+    const request = room.joinRequests?.[requesterId];
+    if (!request || request.status !== JOIN_REQUEST_STATUS.PENDING) {
+      throw new GameActionError('İstek artık iptal edilemez.', 'REQUEST_NOT_PENDING');
+    }
+    const now = Timestamp.now();
+    transaction.update(reference, {
+      joinRequests: {
+        ...room.joinRequests,
+        [requesterId]: { ...request, status: JOIN_REQUEST_STATUS.CANCELLED, updatedAt: now, decisionAt: now, decidedBy: requesterId },
+      },
+      joinRequestAction: joinRequestAction('cancel', requesterId, requesterId),
+    });
+    return true;
+  });
+}
+
+export async function expireJoinRequest(roomCode, actorId, requesterId) {
+  return runTransaction(db, async (transaction) => {
+    const reference = roomRef(roomCode);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) return false;
+    const room = snapshot.data();
+    const request = room.joinRequests?.[requesterId];
+    if (!request || request.status !== JOIN_REQUEST_STATUS.PENDING) return false;
+    if (actorId !== requesterId && !room.players?.[actorId]) throw new GameActionError('Bu isteği sona erdiremezsin.', 'NOT_PLAYER');
+    if (!isJoinRequestExpired(request)) throw new GameActionError('İstek henüz sona ermedi.', 'REQUEST_ACTIVE');
+    const now = Timestamp.now();
+    transaction.update(reference, {
+      joinRequests: {
+        ...room.joinRequests,
+        [requesterId]: { ...request, status: JOIN_REQUEST_STATUS.EXPIRED, updatedAt: now, decisionAt: now, decidedBy: actorId },
+      },
+      joinRequestAction: joinRequestAction('expire', actorId, requesterId),
+    });
+    return true;
+  });
+}
+
+export async function clearClosedJoinRequest(roomCode, actorId, requesterId) {
+  return runTransaction(db, async (transaction) => {
+    const reference = roomRef(roomCode);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) return false;
+    const room = snapshot.data();
+    const request = room.joinRequests?.[requesterId];
+    if (!request || request.status === JOIN_REQUEST_STATUS.PENDING) return false;
+    if (actorId !== requesterId && room.hostId !== actorId) throw new GameActionError('Bu isteği temizleyemezsin.', 'HOST_ONLY');
+    const joinRequests = { ...room.joinRequests };
+    delete joinRequests[requesterId];
+    transaction.update(reference, {
+      joinRequests,
+      joinRequestAction: joinRequestAction('clear', actorId, requesterId),
+    });
+    return true;
+  });
 }
 
 export async function leaveRoom(roomCode, userId) {

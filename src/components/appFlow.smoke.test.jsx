@@ -8,11 +8,16 @@ import { LoginScreen } from './LoginScreen';
 import { WaitingRoom } from './WaitingRoom';
 
 const serviceMocks = vi.hoisted(() => ({
+  acceptJoinRequest: vi.fn().mockResolvedValue(true),
+  clearClosedJoinRequest: vi.fn().mockResolvedValue(false),
   claimRegion: vi.fn().mockResolvedValue('claiming'),
   endTurn: vi.fn().mockResolvedValue(true),
   ensureTurnIncome: vi.fn().mockResolvedValue(false),
+  expireJoinRequest: vi.fn().mockResolvedValue(false),
+  rejectJoinRequest: vi.fn().mockResolvedValue(true),
   sendChatMessage: vi.fn().mockResolvedValue(true),
   skipOfflineTurn: vi.fn().mockResolvedValue(true),
+  voteJoinRequest: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('../services/roomService', () => serviceMocks);
@@ -48,6 +53,7 @@ const claimingRoom = {
   turnNumber: 1,
   roundNumber: 1,
   chat: [],
+  joinRequests: {},
 };
 
 let container;
@@ -100,6 +106,7 @@ describe('local application flow smoke', () => {
       }}
       isHost
       handleMapUpload={() => {}}
+      handleMapFile={() => {}}
       startGame={startGame}
       leaveRoom={() => {}}
       resetApp={() => {}}
@@ -114,6 +121,35 @@ describe('local application flow smoke', () => {
     expect(startGame).toHaveBeenCalledOnce();
   });
 
+  it('routes drag-and-drop through the same SVG file handler and prevents navigation', async () => {
+    const handleMapFile = vi.fn();
+    await render(<WaitingRoom
+      roomCode="ABCD"
+      players={[player]}
+      roomData={{ hostId: 'p1', mapSvg: '', mapValidation: { valid: false, regionCount: 0, errors: [], warnings: [] } }}
+      isHost
+      handleMapUpload={() => {}}
+      handleMapFile={handleMapFile}
+      startGame={() => {}}
+      leaveRoom={() => {}}
+      resetApp={() => {}}
+      loading={false}
+      error=""
+    />);
+    const dropzone = container.querySelector('.aop-map-dropzone');
+    const svgFile = new File(['<svg/>'], 'map.svg', { type: 'image/svg+xml' });
+    const dragEnter = new Event('dragenter', { bubbles: true, cancelable: true });
+    Object.defineProperty(dragEnter, 'dataTransfer', { value: { files: [svgFile] } });
+    await act(async () => dropzone.dispatchEvent(dragEnter));
+    expect(dragEnter.defaultPrevented).toBe(true);
+    expect(dropzone.classList.contains('is-dragging')).toBe(true);
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [svgFile] } });
+    await act(async () => dropzone.dispatchEvent(drop));
+    expect(drop.defaultPrevented).toBe(true);
+    expect(handleMapFile).toHaveBeenCalledWith(svgFile);
+  });
+
   it('renders claiming, selects a region, and submits the purchase transaction', async () => {
     await render(<GameRoom user={{ uid: 'p1' }} roomCode="ABCD" roomData={claimingRoom} leaveRoom={() => {}} resetApp={() => {}}/>);
     const mapRegion = container.querySelector('[data-region-id="paper_valley"]');
@@ -123,6 +159,62 @@ describe('local application flow smoke', () => {
     const buyButton = [...container.querySelectorAll('button')].find((button) => button.textContent.includes('Satın Al'));
     await act(async () => buyButton.click());
     expect(serviceMocks.claimRegion).toHaveBeenCalledWith('ABCD', 'p1', 'paper_valley');
+  });
+
+  it('centers accessible chat send controls and shows host join-request actions', async () => {
+    const requestRoom = {
+      ...claimingRoom,
+      joinRequests: {
+        newcomer: {
+          uid: 'newcomer', name: 'Bora', status: 'pending', requiredVoterIds: [],
+          approvals: {}, rejections: {}, createdAt: Date.now(), expiresAt: Date.now() + 600_000,
+        },
+      },
+    };
+    await render(<GameRoom user={{ uid: 'p1' }} roomCode="ABCD" roomData={requestRoom} leaveRoom={() => {}} resetApp={() => {}}/>);
+    const sendButton = container.querySelector('.aop-chat-send');
+    expect(sendButton?.getAttribute('aria-label')).toBe('Mesaj gönder');
+    expect(sendButton?.querySelector('svg')).not.toBeNull();
+    const acceptButton = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Kabul Et');
+    expect(acceptButton).toBeTruthy();
+    await act(async () => acceptButton.click());
+    expect(serviceMocks.acceptJoinRequest).toHaveBeenCalledWith('ABCD', 'p1', 'newcomer');
+
+    await render(<GameRoom
+      user={{ uid: 'p1' }}
+      roomCode="ABCD"
+      roomData={{
+        ...requestRoom,
+        joinRequests: {
+          newcomer: { ...requestRoom.joinRequests.newcomer, status: 'cancelled' },
+        },
+      }}
+      leaveRoom={() => {}}
+      resetApp={() => {}}
+    />);
+    expect(container.textContent).not.toContain('Oyuna katılmak istiyor');
+  });
+
+  it('highlights exactly the legal claims stored in mapDefinition', async () => {
+    const regions = [
+      { id: 'owned', name: 'Owned', price: 5000, income: 500, claimNeighbors: ['legal'] },
+      { id: 'legal', name: 'Legal', price: 5000, income: 500, claimNeighbors: ['owned'] },
+      { id: 'far', name: 'Far', price: 5000, income: 500, claimNeighbors: [] },
+    ];
+    const room = {
+      ...claimingRoom,
+      mapDefinition: {
+        version: 1,
+        regionIds: regions.map(({ id }) => id),
+        regions,
+        regionsById: Object.fromEntries(regions.map((item) => [item.id, item])),
+      },
+      mapSvg: '<svg viewBox="0 0 30 10"><rect id="owned" data-region-id="owned" data-region="true" width="10" height="10"/><rect id="legal" data-region-id="legal" data-region="true" x="10" width="10" height="10"/><rect id="far" data-region-id="far" data-region="true" x="20" width="10" height="10"/></svg>',
+      claims: { owned: { ownerId: 'p1' } },
+      players: { p1: { ...player, money: 10_000, regionIds: ['owned'] } },
+    };
+    await render(<GameRoom user={{ uid: 'p1' }} roomCode="ABCD" roomData={room} leaveRoom={() => {}} resetApp={() => {}}/>);
+    expect([...container.querySelectorAll('.legal-land')].map((element) => element.id)).toEqual(['legal']);
   });
 
   it('uses the bottom-sheet game layout at a 768px tablet viewport', async () => {

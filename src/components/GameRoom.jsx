@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { calculateIncome } from '../game/economy';
 import { PHASES } from '../game/phases';
+import { isJoinRequestExpired, valueMillis } from '../game/joinRequests';
 import { getClaimEligibility, getLegalClaims } from '../game/rules';
 import {
   claimRegion,
+  acceptJoinRequest,
+  clearClosedJoinRequest,
   endTurn,
   ensureTurnIncome,
+  expireJoinRequest,
+  rejectJoinRequest,
   sendChatMessage,
   skipOfflineTurn,
+  voteJoinRequest,
 } from '../services/roomService';
 import { ClaimCompletePanel } from './ClaimCompletePanel';
 import { MapViewer } from './MapViewer';
@@ -25,6 +31,7 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches
   ));
   const chatEndRef = useRef(null);
+  const expiringRequests = useRef(new Set());
 
   const me = roomData.players?.[user.uid];
   const currentPlayerId = roomData.turnOrder?.[roomData.turnIndex] || null;
@@ -39,6 +46,9 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     ? me.income
     : calculateIncome(roomData.mapDefinition, roomData.claims, user.uid);
   const lastChatId = roomData.chat?.at(-1)?.id || roomData.chat?.length || 0;
+  const pendingJoinRequests = useMemo(() => Object.values(roomData.joinRequests || {})
+    .filter((request) => request.status === 'pending' && !isJoinRequestExpired(request, now))
+    .sort((a, b) => (a.createdAt?.toMillis?.() || 0) - (b.createdAt?.toMillis?.() || 0)), [now, roomData.joinRequests]);
 
   const legalClaims = useMemo(() => (
     isMyTurn ? getLegalClaims(roomData.mapDefinition, roomData.claims, user.uid) : []
@@ -81,6 +91,29 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     if (selectedId && !regionsById[selectedId]) setSelectedId(null);
   }, [regionsById, selectedId]);
 
+  useEffect(() => {
+    Object.values(roomData.joinRequests || {}).forEach((request) => {
+      if (request.status !== 'pending' || !isJoinRequestExpired(request, now) || expiringRequests.current.has(request.uid)) return;
+      expiringRequests.current.add(request.uid);
+      expireJoinRequest(roomCode, user.uid, request.uid)
+        .catch(() => {})
+        .finally(() => expiringRequests.current.delete(request.uid));
+    });
+  }, [now, roomCode, roomData.joinRequests, user.uid]);
+
+  useEffect(() => {
+    if (!isHost) return;
+    Object.values(roomData.joinRequests || {}).forEach((request) => {
+      if (request.status === 'pending'
+        || now - valueMillis(request.decisionAt) < 30_000
+        || expiringRequests.current.has(`clear-${request.uid}`)) return;
+      expiringRequests.current.add(`clear-${request.uid}`);
+      clearClosedJoinRequest(roomCode, user.uid, request.uid)
+        .catch(() => {})
+        .finally(() => expiringRequests.current.delete(`clear-${request.uid}`));
+    });
+  }, [isHost, now, roomCode, roomData.joinRequests, user.uid]);
+
   const runAction = useCallback(async (action, { clearSelection = false } = {}) => {
     if (actionPending) return false;
     setActionPending(true);
@@ -108,6 +141,16 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     const sent = await runAction(() => sendChatMessage(roomCode, user.uid, message));
     if (sent) setMessage('');
   };
+  const approveRequest = (requesterId) => runAction(() => (
+    isHost
+      ? acceptJoinRequest(roomCode, user.uid, requesterId)
+      : voteJoinRequest(roomCode, user.uid, requesterId, 'approve')
+  ));
+  const rejectRequest = (requesterId) => runAction(() => (
+    isHost
+      ? rejectJoinRequest(roomCode, user.uid, requesterId)
+      : voteJoinRequest(roomCode, user.uid, requesterId, 'reject')
+  ));
 
   const shared = {
     roomData,
@@ -132,6 +175,9 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     buySelected,
     finishTurn,
     skipPlayer,
+    pendingJoinRequests,
+    approveRequest,
+    rejectRequest,
     resetApp,
   };
 

@@ -1,4 +1,5 @@
 import { Icon, Icons } from '../Icons';
+import { JoinRequestCards } from '../JoinRequestCards';
 
 export const RightPanel = ({
   me,
@@ -12,6 +13,12 @@ export const RightPanel = ({
   actionPending,
   buySelected,
   finishTurn,
+  roomData,
+  pendingJoinRequests,
+  approveRequest,
+  rejectRequest,
+  isHost,
+  now,
 }) => (
   <aside className="aop-right-panel">
     <section className="aop-command-summary">
@@ -46,5 +53,17 @@ export const RightPanel = ({
         <small>Gelir üretmez, sırayı ilerletir</small>
       </button>
     </section>
+    {pendingJoinRequests.length > 0 && (
+      <JoinRequestCards
+        requests={pendingJoinRequests}
+        roomData={roomData}
+        userId={me.id}
+        isHost={isHost}
+        now={now}
+        actionPending={actionPending}
+        onApprove={approveRequest}
+        onReject={rejectRequest}
+      />
+    )}
   </aside>
 );

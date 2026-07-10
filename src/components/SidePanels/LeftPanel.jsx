@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { CHAT_MESSAGE_LIMIT, OFFLINE_SKIP_TIMEOUT, PRESENCE_OFFLINE_TIMEOUT } from '../../constants';
 import { Icon, Icons } from '../Icons';
 
@@ -18,8 +19,12 @@ export const LeftPanel = ({
   submitMessage,
   chatEndRef,
 }) => {
+  const activeRowRef = useRef(null);
   const activeLastSeen = lastActiveMillis(roomData.players?.[currentPlayerId]?.lastActive);
   const maySkip = isHost && currentPlayerId && now - activeLastSeen >= OFFLINE_SKIP_TIMEOUT;
+  useEffect(() => {
+    activeRowRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [currentPlayerId]);
   return (
     <aside className="aop-left-panel">
       <section className="aop-player-ledger">
@@ -32,7 +37,7 @@ export const LeftPanel = ({
             const active = playerId === currentPlayerId;
             const offline = now - lastActiveMillis(player.lastActive) >= PRESENCE_OFFLINE_TIMEOUT;
             return (
-              <div key={playerId} className={`aop-player-row ${active ? 'is-active' : ''} ${offline ? 'is-offline' : ''}`}>
+              <div ref={active ? activeRowRef : null} key={playerId} className={`aop-player-row ${active ? 'is-active' : ''} ${offline ? 'is-offline' : ''}`}>
                 <span className="aop-player-seal" style={{ backgroundColor: player.color }}>{player.name[0]}</span>
                 <span className="min-w-0 flex-1"><strong>{player.name}</strong><small>{(player.money || 0).toLocaleString('tr-TR')} altın</small></span>
                 {active && <b>SIRA</b>}
@@ -67,7 +72,7 @@ export const LeftPanel = ({
             value={message}
             onChange={(event) => setMessage(event.target.value)}
           />
-          <button className="aop-button-secondary" aria-label="Mesaj gönder"><Icon p={Icons.Send} s={17}/></button>
+          <button className="aop-button-secondary aop-chat-send" aria-label="Mesaj gönder"><Icon p={Icons.Send} s={17}/></button>
         </form>
       </section>
     </aside>

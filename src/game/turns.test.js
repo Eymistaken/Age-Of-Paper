@@ -12,6 +12,19 @@ describe('turn progression', () => {
     expect(wrapped).toMatchObject({ turnIndex: 0, turnNumber: 4, roundNumber: 2 });
   });
 
+  it('advances a ten-player round exactly once after all ten turns', () => {
+    let state = {
+      turnOrder: Array.from({ length: 10 }, (_, index) => `p${index}`),
+      turnIndex: 0,
+      turnNumber: 1,
+      roundNumber: 1,
+    };
+    for (let index = 0; index < 9; index += 1) state = advanceTurn(state);
+    expect(state).toMatchObject({ turnIndex: 9, turnNumber: 10, roundNumber: 1 });
+    state = advanceTurn(state);
+    expect(state).toMatchObject({ turnIndex: 0, turnNumber: 11, roundNumber: 2 });
+  });
+
   it('keeps the same active player when an earlier non-active player leaves', () => {
     const result = removePlayerFromTurnState({
       turnOrder: ['a', 'b', 'c'], turnIndex: 2, turnNumber: 8, roundNumber: 3,

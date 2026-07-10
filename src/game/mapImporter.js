@@ -1,6 +1,7 @@
 import { SAFE_REGION_ID, validateMapDefinition } from './mapValidation';
 import { applyAutomaticPricing, PRICING_VERSION, summarizeRegionEconomy } from './pricing';
 import { boundsArea, measureRegionGeometry } from './svgGeometry';
+import { inferBoundaryAdjacency } from './svgAdjacency';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const PLAYABLE_SELECTOR = 'path,polygon,rect,circle,ellipse,polyline';
@@ -96,16 +97,6 @@ function splitNeighborIds(value) {
   return String(value || '').split(/[\s,;]+/).map((item) => item.trim()).filter(Boolean);
 }
 
-function boundsTouch(a, b, tolerance) {
-  if (!a || !b) return false;
-  return !(
-    a.x + a.width + tolerance < b.x ||
-    b.x + b.width + tolerance < a.x ||
-    a.y + a.height + tolerance < b.y ||
-    b.y + b.height + tolerance < a.y
-  );
-}
-
 function unique(values) {
   return [...new Set(values)];
 }
@@ -195,30 +186,72 @@ export function importSvgMap(svgText) {
     });
   }
 
-  const tolerance = Math.max(viewBox.width, viewBox.height) * 0.0125;
   const usedLegacyInference = records.some((record) => record.claimTokens === null || record.landTokens === null);
   if (usedLegacyInference && records.length) {
     importIssues.push({
       severity: 'warning',
       code: 'LEGACY_NEIGHBORS',
-      message: 'Komşuluk metadata’sı eksik. Bağlantılar yalnızca SVG viewBox geometrisinden yaklaşık çıkarıldı; yayınlamadan önce kontrol edin.',
+      message: 'Komşuluk metadata’sı eksik. Bağlantılar SVG viewBox koordinatlarındaki gerçek ortak sınır temasından yaklaşık çıkarıldı; yayınlamadan önce kontrol edin.',
+    });
+  }
+
+  const boundaryNeededIds = records
+    .filter((record) => (record.claimTokens === null || record.landTokens === null)
+      && geometry.unmeasuredBoundaryIds.includes(record.id))
+    .map((record) => record.id);
+  if (boundaryNeededIds.length) {
+    importIssues.push({
+      severity: 'warning',
+      code: 'ADJACENCY_UNCERTAIN',
+      message: `${boundaryNeededIds.length} bölgenin sınırı ölçülemedi. Yanlış pozitif üretmemek için bu bölgelerde otomatik komşuluk kurulmadı; metadata ekleyin.`,
     });
   }
 
   const resolveTokens = (tokens) => unique(tokens.map((token) => sourceToSafe.get(token) || normalizeRegionId(token)));
+  const automaticGraph = inferBoundaryAdjacency(
+    pricedRecords.map((record) => record.id),
+    geometry.boundariesById,
+    geometry.boundsById,
+    viewBox,
+  );
+  const buildGraph = (tokenField) => {
+    const graph = new Map(pricedRecords.map((record) => [record.id, new Set()]));
+    const explicitById = new Map(pricedRecords.map((record) => [
+      record.id,
+      record[tokenField] === null ? null : new Set(resolveTokens(record[tokenField])),
+    ]));
+    for (const record of pricedRecords) {
+      for (const neighborId of explicitById.get(record.id) || []) {
+        if (!safeIds.has(neighborId)) graph.get(record.id).add(neighborId);
+      }
+    }
+    for (let first = 0; first < pricedRecords.length; first += 1) {
+      for (let second = first + 1; second < pricedRecords.length; second += 1) {
+        const firstId = pricedRecords[first].id;
+        const secondId = pricedRecords[second].id;
+        const firstExplicit = explicitById.get(firstId);
+        const secondExplicit = explicitById.get(secondId);
+        const connected = firstExplicit !== null || secondExplicit !== null
+          ? Boolean(firstExplicit?.has(secondId) || secondExplicit?.has(firstId))
+          : automaticGraph.get(firstId)?.has(secondId);
+        if (connected) {
+          graph.get(firstId).add(secondId);
+          graph.get(secondId).add(firstId);
+        }
+      }
+    }
+    return graph;
+  };
+  const claimGraph = buildGraph('claimTokens');
+  const landGraph = buildGraph('landTokens');
   const regions = pricedRecords.map((record) => {
-    const inferred = pricedRecords
-      .filter((other) => other.id !== record.id && boundsTouch(record.bounds, other.bounds, tolerance))
-      .map((other) => other.id);
-    const claimNeighbors = record.claimTokens === null ? inferred : resolveTokens(record.claimTokens);
-    const landNeighbors = record.landTokens === null ? inferred : resolveTokens(record.landTokens);
     return {
       id: record.id,
       name: record.name,
       price: record.price,
       income: record.income,
-      landNeighbors: unique(landNeighbors),
-      claimNeighbors: unique(claimNeighbors),
+      landNeighbors: [...landGraph.get(record.id)],
+      claimNeighbors: [...claimGraph.get(record.id)],
       coastal: record.coastal,
     };
   });
@@ -227,7 +260,7 @@ export function importSvgMap(svgText) {
     version: 1,
     pricingVersion: PRICING_VERSION,
     importedAt: Date.now(),
-    importer: usedLegacyInference ? 'legacy-svg-v2' : 'metadata-svg-v2',
+    importer: usedLegacyInference ? 'legacy-svg-v3' : 'metadata-svg-v2',
     viewBox,
     regionIds: regions.map((region) => region.id),
     regions,

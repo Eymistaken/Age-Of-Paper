@@ -37,6 +37,7 @@ Yeni oda belgeleri `schemaVersion: 2` kullanır. Önemli alanlar:
 - `claims`
 - `turnOrder`, `turnIndex`, `turnNumber`, `roundNumber`
 - `chat`, `lastAction`
+- `joinRequests`, `joinRequestAction`
 
 Oyuncunun `income` alanı `BASE_INCOME + sahip olduğu bölgelerin tanımlı gelirleri` toplamıdır. `lastIncomeTurn`, aynı `turnNumber` için iki kez gelir verilmesini engeller. Claim ve tur eylemleri `src/services/roomService.js` içindeki Firestore transaction fonksiyonlarında merkezi olarak yürütülür.
 
@@ -82,7 +83,7 @@ Bölge ID’leri Firestore field path ile uyumlu biçime normalize edilir. Nokta
 
 Açık `data-region="true"` yoksa importer, uygun `path`, `polygon`, `rect`, `circle`, `ellipse` ve `polyline` öğelerini aday kabul eder. `<defs>`, `clipPath`, `mask`, `pattern`, `marker`, `symbol`, `fill="none"`, su/dekorasyon sınıfları ve `data-ignore="true"` öğeleri dışlanır.
 
-Komşuluk metadata’sı eksikse yalnızca import sırasında SVG `viewBox` koordinatlarında deterministik bounding-box yakınlığı kullanılır. Tarayıcı ölçüm yüzeyi `getBBox()` ve CTM ile path komutlarını ve transform zincirini SVG motoruna ölçtürür. Ölçüm alınamazsa bölge fiyatı güvenli medyan büyüklüğe düşer ve lobide uyarı gösterilir; ham path parametreleri x/y çiftleri olarak yorumlanmaz. Sonuç zoom, viewport ve cihaz genişliğinden etkilenmez. Yeni haritalarda açık metadata kullanılmalıdır.
+Komşuluk metadata’sı eksikse yalnızca import sırasında iki aşamalı SVG `viewBox` geometrisi kullanılır. Bounding box yalnızca ucuz aday elemesidir; kesin karar, ortak koordinatlara CTM ile taşınmış ve eğrilerden örneklenmiş sınır segmentlerinin ölçek bağımsız mesafesi ile anlamlı ortak uzunluğuna göre verilir. Tek köşe teması, iç içe bounding box veya arada toleranstan büyük boşluk komşuluk oluşturmaz. Ölçüm alınamazsa importer yanlış pozitif üretmek yerine otomatik bağlantı kurmaz ve lobide metadata uyarısı gösterir. Fiyat için ölçülemeyen bölge güvenli medyan büyüklüğe düşer; ham path parametreleri x/y çiftleri olarak yorumlanmaz. Sonuç zoom, viewport ve cihaz genişliğinden etkilenmez. Yeni haritalarda açık metadata kullanılmalıdır.
 
 Importer, ekrana vermeden önce `script`, `foreignObject`, `iframe`, `object`, `embed`, inline event handler ve güvenli olmayan harici URL/href içeriklerini temizler.
 
@@ -106,10 +107,30 @@ Presence heartbeat 20 saniyedir. Presence yalnız bir gösterge olup tur zaman a
 
 Chat mesajlarında benzersiz ID, gönderen UID ve zaman vardır. Mesajlar 160 karakterle, oda geçmişi son 80 mesajla sınırlıdır.
 
+## Oyun sırasında katılma
+
+Lobby evresinde doğrudan katılım sürer ve oda kapasitesi 10 oyuncudur. `claiming` sırasında oda koduyla gelen kullanıcı doğrudan oyuncu yapılmaz; oda belgesindeki en fazla 20 kayıtla sınırlı `joinRequests` haritasına 10 dakikalık bir istek eklenir. İstek sahibi bekleme durumunu localStorage ile sayfa yenilemesinde sürdürebilir ve transaction ile vazgeçebilir.
+
+Güncel host isteği tek başına kabul veya tamamen ret edebilir. Host cevap vermezse, istek oluşturulduğunda snapshot alınan host dışı seçmenlerin hâlâ odada bulunanlarının tamamı kabul ettiğinde istek kabul edilir; boş seçmen kümesi otomatik kabul değildir. Kabul transaction’ı kapasiteyi, evreyi ve tarafsız bölgeyi yeniden doğrular; yeni oyuncuyu sıfır para ve bölgeyle sıra sonuna ekler, mevcut tur/round alanlarını değiştirmez. Terminal istekler host tarafından temizlenir ve oda belgesinin büyümesi sınırlandırılır.
+
+SVG yükleme alanı aynı sanitization, pricing ve validation hattını kullanan dosya seçici ile sürükle–bırak davranışını birlikte sunar. Tek `.svg` dosyası kabul edilir ve dosya boyutu 600 KB ile sınırlıdır.
+
 ## Güvenlik sınırları
 
-`firestore.rules`, oda oluşturma şemasını, lobby join kapasitesini, oyuncuya özel presence alanını, host harita/başlatma eylemlerini ve claim/tur/chat alan ayrımını doğrular. Claim fiyatı ve geliri kurallarda tekrar sabitlenmez; odanın doğrulanmış `mapDefinition` kaydı kullanılır.
+`firestore.rules`, oda oluşturma şemasını, 10 kişilik lobby join kapasitesini, oyuncuya özel presence alanını, host harita/başlatma eylemlerini ve claim/tur/chat alan ayrımını doğrular. Katılma isteğinde kendi kimliğiyle oluşturma/iptal, oyuncuya özel oy, host kararı, host dışı oybirliği, süre, kapasite ve tur alanlarının değişmemesi ayrıca doğrulanır. Claim fiyatı ve geliri kurallarda tekrar sabitlenmez; odanın doğrulanmış `mapDefinition` kaydı kullanılır.
 
 Yine de oyun tamamen istemci tabanlıdır. Harita importu ve transaction kararları yetkili bir backend veya Cloud Function üzerinde çalışmadığı için rules güçlü bir tutarlılık katmanı olsa da tam hile koruması değildir. Rekabetçi bir savaş sistemi eklenmeden önce kritik eylemler güvenilir sunucu koduna taşınmalı, App Check ve uygun kimlik doğrulama değerlendirilmelidir. Firebase web yapılandırma anahtarı bir sunucu parolası değildir; gerçek erişim güvenliği Authentication ve Firestore Rules ile sağlanır.
 
 Bu depodaki `firestore.rules` yalnızca kaynak dosyadır. Değişiklikleri deployment etme işlemi bu refaktörün parçası değildir.
+
+Kuralları yerel Firestore emulator ile sınamak için:
+
+```bash
+npm run test:rules
+```
+
+Kaynak kuralları daha sonra açıkça deploy etmek için:
+
+```bash
+npx firebase-tools deploy --only firestore:rules --project eymistaken
+```

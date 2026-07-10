@@ -33,8 +33,23 @@ describe('SVG map importer', () => {
     globalThis.innerWidth = 2400;
     const wideViewport = importSvgMap(svg).mapDefinition;
     expect(wideViewport.regions).toEqual(narrowViewport.regions);
-    expect(wideViewport.importer).toBe('legacy-svg-v2');
+    expect(wideViewport.importer).toBe('legacy-svg-v3');
     expect(wideViewport.pricingVersion).toBe(2);
+    expect(wideViewport.regionsById.a.claimNeighbors).toEqual(['b']);
+    expect(wideViewport.regionsById.b.claimNeighbors).toEqual(['a']);
+  });
+
+  it('uses explicit metadata instead of geometry and symmetrizes the graph', () => {
+    const svg = `<svg viewBox="0 0 300 100" xmlns="http://www.w3.org/2000/svg">
+      <rect id="a" data-region="true" data-claim-neighbors="c" x="0" width="100" height="100" />
+      <rect id="b" data-region="true" x="100" width="100" height="100" />
+      <rect id="c" data-region="true" x="200" width="100" height="100" />
+    </svg>`;
+    const result = importSvgMap(svg).mapDefinition;
+    expect(result.regionsById.a.claimNeighbors).toEqual(['c']);
+    expect(result.regionsById.b.claimNeighbors).toEqual(['c']);
+    expect(result.regionsById.c.claimNeighbors).toEqual(expect.arrayContaining(['a', 'b']));
+    expect(result.regionsById.c.claimNeighbors).not.toContain('c');
   });
 
   it('ignores empty viewBox space and normalizes automatic prices by median region size', () => {

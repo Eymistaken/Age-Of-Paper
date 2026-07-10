@@ -38,6 +38,16 @@ function boundsFromPoints(points) {
   };
 }
 
+function parsedPoints(points) {
+  const numbers = String(points || '').match(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi)?.map(Number) || [];
+  if (numbers.length < 4 || numbers.length % 2 !== 0) return [];
+  const result = [];
+  for (let index = 0; index < numbers.length; index += 2) {
+    result.push({ x: numbers[index], y: numbers[index + 1] });
+  }
+  return result;
+}
+
 export function basicShapeBounds(element) {
   if (!element || hasTransformContext(element)) return null;
   const tag = element.tagName.toLowerCase();
@@ -63,6 +73,45 @@ export function basicShapeBounds(element) {
   return validBounds(bounds) ? bounds : null;
 }
 
+export function basicShapeBoundary(element) {
+  if (!element || hasTransformContext(element)) return null;
+  const tag = element.tagName.toLowerCase();
+  if (tag === 'rect') {
+    const x = parseNumber(element.getAttribute('x'));
+    const y = parseNumber(element.getAttribute('y'));
+    const width = parseNumber(element.getAttribute('width'));
+    const height = parseNumber(element.getAttribute('height'));
+    if (width <= 0 || height <= 0) return null;
+    return [[
+      { x, y }, { x: x + width, y }, { x: x + width, y: y + height },
+      { x, y: y + height }, { x, y },
+    ]];
+  }
+  if (tag === 'polygon' || tag === 'polyline') {
+    const points = parsedPoints(element.getAttribute('points'));
+    if (points.length < 2) return null;
+    if (tag === 'polygon' && (points[0].x !== points.at(-1).x || points[0].y !== points.at(-1).y)) {
+      points.push({ ...points[0] });
+    }
+    return [points];
+  }
+  if (tag === 'circle' || tag === 'ellipse') {
+    const cx = parseNumber(element.getAttribute('cx'));
+    const cy = parseNumber(element.getAttribute('cy'));
+    const rx = tag === 'circle' ? parseNumber(element.getAttribute('r')) : parseNumber(element.getAttribute('rx'));
+    const ry = tag === 'circle' ? rx : parseNumber(element.getAttribute('ry'));
+    if (rx <= 0 || ry <= 0) return null;
+    const points = [];
+    const steps = 96;
+    for (let index = 0; index <= steps; index += 1) {
+      const angle = (Math.PI * 2 * index) / steps;
+      points.push({ x: cx + Math.cos(angle) * rx, y: cy + Math.sin(angle) * ry });
+    }
+    return [points];
+  }
+  return null;
+}
+
 export function applyMatrixToBounds(bounds, matrix, measurementScale = 1) {
   const points = [
     [bounds.x, bounds.y],
@@ -83,8 +132,17 @@ export function applyMatrixToBounds(bounds, matrix, measurementScale = 1) {
   };
 }
 
-function browserMeasuredBounds(svg, regionIds, viewBox, hostDocument) {
-  if (!hostDocument?.body || typeof hostDocument.createElement !== 'function') return new Map();
+function transformedPoint(point, matrix, measurementScale) {
+  return {
+    x: (matrix.a * point.x + matrix.c * point.y + matrix.e) / measurementScale,
+    y: (matrix.b * point.x + matrix.d * point.y + matrix.f) / measurementScale,
+  };
+}
+
+function browserMeasuredGeometry(svg, regionIds, viewBox, hostDocument) {
+  if (!hostDocument?.body || typeof hostDocument.createElement !== 'function') {
+    return { boundsById: new Map(), boundariesById: new Map() };
+  }
   const host = hostDocument.createElement('div');
   const maxDimension = Math.max(viewBox.width, viewBox.height);
   const measurementScale = maxDimension > 2048 ? 2048 / maxDimension : 1;
@@ -112,7 +170,8 @@ function browserMeasuredBounds(svg, regionIds, viewBox, hostDocument) {
     [...clone.querySelectorAll('[data-region-id]')]
       .map((element) => [element.getAttribute('data-region-id'), element]),
   );
-  const measured = new Map();
+  const boundsById = new Map();
+  const boundariesById = new Map();
   try {
     for (const regionId of regionIds) {
       const element = elements.get(regionId);
@@ -123,7 +182,28 @@ function browserMeasuredBounds(svg, regionIds, viewBox, hostDocument) {
         const bounds = matrix
           ? applyMatrixToBounds(localBounds, matrix, measurementScale)
           : (!hasTransformContext(element) ? localBounds : null);
-        if (validBounds(bounds)) measured.set(regionId, bounds);
+        if (validBounds(bounds)) boundsById.set(regionId, bounds);
+
+        if (matrix && typeof element.getTotalLength === 'function' && typeof element.getPointAtLength === 'function') {
+          const totalLength = element.getTotalLength();
+          if (Number.isFinite(totalLength) && totalLength > 0) {
+            const targetStep = Math.max(Math.hypot(viewBox.width, viewBox.height) * 0.00125, 0.05);
+            const samples = Math.min(4096, Math.max(24, Math.ceil(totalLength / targetStep)));
+            const lines = [[]];
+            for (let index = 0; index <= samples; index += 1) {
+              const localPoint = element.getPointAtLength((totalLength * index) / samples);
+              const point = transformedPoint(localPoint, matrix, measurementScale);
+              const current = lines.at(-1);
+              const previous = current.at(-1);
+              if (previous && Math.hypot(point.x - previous.x, point.y - previous.y) > targetStep * 8) {
+                lines.push([]);
+              }
+              lines.at(-1).push(point);
+            }
+            const usableLines = lines.filter((line) => line.length > 1);
+            if (usableLines.length) boundariesById.set(regionId, usableLines);
+          }
+        }
       } catch {
         // Some SVG engines throw for detached or non-renderable graphics.
       }
@@ -131,19 +211,24 @@ function browserMeasuredBounds(svg, regionIds, viewBox, hostDocument) {
   } finally {
     host.remove();
   }
-  return measured;
+  return { boundsById, boundariesById };
 }
 
 export function measureRegionGeometry(svg, records, viewBox, hostDocument = globalThis.document) {
-  const measured = browserMeasuredBounds(svg, records.map((record) => record.id), viewBox, hostDocument);
+  const measured = browserMeasuredGeometry(svg, records.map((record) => record.id), viewBox, hostDocument);
   const boundsById = new Map();
+  const boundariesById = new Map();
   const unmeasuredIds = [];
+  const unmeasuredBoundaryIds = [];
   for (const record of records) {
-    const bounds = measured.get(record.id) || basicShapeBounds(record.element);
+    const bounds = measured.boundsById.get(record.id) || basicShapeBounds(record.element);
+    const boundary = measured.boundariesById.get(record.id) || basicShapeBoundary(record.element);
     if (validBounds(bounds)) boundsById.set(record.id, bounds);
     else unmeasuredIds.push(record.id);
+    if (boundary?.length) boundariesById.set(record.id, boundary);
+    else unmeasuredBoundaryIds.push(record.id);
   }
-  return { boundsById, unmeasuredIds };
+  return { boundsById, boundariesById, unmeasuredIds, unmeasuredBoundaryIds };
 }
 
 export function boundsArea(bounds) {

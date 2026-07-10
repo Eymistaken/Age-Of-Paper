@@ -5,11 +5,15 @@ import { auth, db } from './config/firebase';
 import { HEARTBEAT_INTERVAL } from './constants';
 import { GameRoom } from './components/GameRoom';
 import { LoginScreen } from './components/LoginScreen';
+import { JoinRequestWaiting } from './components/JoinRequestWaiting';
 import { WaitingRoom } from './components/WaitingRoom';
 import { importSvgMap } from './game/mapImporter';
+import { readSvgFile } from './game/svgUpload';
 import { PHASES, resolvePhase } from './game/phases';
 import {
   createRoom as createRoomTransaction,
+  cancelJoinRequest,
+  expireJoinRequest,
   joinRoom as joinRoomTransaction,
   leaveRoom as leaveRoomTransaction,
   setRoomMap,
@@ -24,7 +28,17 @@ function normalizeLegacyRoom(room) {
       .filter(([, value]) => value?.owner)
       .map(([regionId, value]) => [regionId, { ownerId: value.owner }]),
   );
-  return { ...room, phase, claims };
+  return { ...room, phase, claims, joinRequests: room.joinRequests || {} };
+}
+
+function storedPendingRequest() {
+  try {
+    const value = JSON.parse(localStorage.getItem('aop_pending_request') || 'null');
+    return value?.roomCode && value?.nickname ? value : null;
+  } catch {
+    localStorage.removeItem('aop_pending_request');
+    return null;
+  }
 }
 
 function App() {
@@ -34,6 +48,8 @@ function App() {
   const [nickname, setNickname] = useState(localStorage.getItem('aop_nickname') || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [pendingRequest, setPendingRequest] = useState(storedPendingRequest);
+  const [pendingRoomData, setPendingRoomData] = useState(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
@@ -64,6 +80,59 @@ function App() {
     return unsubscribe;
   }, [roomCode, user]);
 
+  useEffect(() => {
+    if (!user || roomCode || !pendingRequest?.roomCode) return undefined;
+    const code = pendingRequest.roomCode;
+    return onSnapshot(doc(db, 'rooms', code), (snapshot) => {
+      if (!snapshot.exists()) {
+        localStorage.removeItem('aop_pending_request');
+        setPendingRequest(null);
+        setPendingRoomData(null);
+        setError('Oda artık mevcut değil.');
+        setLoading(false);
+        return;
+      }
+      const room = normalizeLegacyRoom(snapshot.data());
+      const request = room.joinRequests?.[user.uid];
+      if (room.players?.[user.uid]) {
+        localStorage.removeItem('aop_pending_request');
+        localStorage.setItem('aop_nickname', pendingRequest.nickname);
+        localStorage.setItem('aop_room', code);
+        setPendingRequest(null);
+        setPendingRoomData(null);
+        setRoomData(room);
+        setRoomCode(code);
+      } else if (!request) {
+        localStorage.removeItem('aop_pending_request');
+        setPendingRequest(null);
+        setPendingRoomData(null);
+        setError('Katılma isteği artık mevcut değil.');
+      } else if (request.status === 'pending' && room.phase !== PHASES.CLAIMING) {
+        cancelJoinRequest(code, user.uid).catch(() => {});
+        localStorage.removeItem('aop_pending_request');
+        setPendingRequest(null);
+        setPendingRoomData(null);
+        setError('Toprak edinme evresi tamamlandığı için istek kapatıldı.');
+      } else if (request.status !== 'pending') {
+        const messages = {
+          rejected: 'Katılma isteğin kurucu tarafından reddedildi.',
+          cancelled: 'Katılma isteğin iptal edildi.',
+          expired: 'Katılma isteğinin süresi doldu.',
+        };
+        localStorage.removeItem('aop_pending_request');
+        setPendingRequest(null);
+        setPendingRoomData(null);
+        setError(messages[request.status] || 'Katılma isteği kapandı.');
+      } else {
+        setPendingRoomData(room);
+      }
+      setLoading(false);
+    }, () => {
+      setLoading(false);
+      setError('Katılma isteği bağlantısı kurulamadı.');
+    });
+  }, [pendingRequest, roomCode, user]);
+
   const isInRoom = Boolean(user && roomCode && roomData);
   useEffect(() => {
     if (!isInRoom) return undefined;
@@ -88,11 +157,13 @@ function App() {
   const resetApp = async () => {
     try {
       if (roomCode && user) await leaveRoomTransaction(roomCode, user.uid);
+      else if (pendingRequest && user) await cancelJoinRequest(pendingRequest.roomCode, user.uid);
     } catch (resetError) {
       console.warn('Sıfırlama sırasında oda kaydı temizlenemedi:', resetError);
     } finally {
       localStorage.removeItem('aop_room');
       localStorage.removeItem('aop_nickname');
+      localStorage.removeItem('aop_pending_request');
       window.location.reload();
     }
   };
@@ -116,12 +187,52 @@ function App() {
     setLoading(true);
     setError('');
     try {
-      const normalizedCode = await joinRoomTransaction(code, user.uid, nickname);
+      const result = await joinRoomTransaction(code, user.uid, nickname);
       localStorage.setItem('aop_nickname', nickname.trim());
-      setRoomCode(normalizedCode);
+      if (result.mode === 'requested') {
+        const pending = { roomCode: result.code, nickname: nickname.trim() };
+        localStorage.setItem('aop_pending_request', JSON.stringify(pending));
+        setPendingRequest(pending);
+        setPendingRoomData({ joinRequests: { [user.uid]: result.request } });
+        setLoading(false);
+      } else {
+        setRoomCode(result.code);
+      }
     } catch (joinError) {
       setError(joinError.message);
       setLoading(false);
+    }
+  };
+
+  const cancelPending = async () => {
+    if (!user || !pendingRequest) return;
+    setLoading(true);
+    let cancelled = false;
+    try {
+      cancelled = await cancelJoinRequest(pendingRequest.roomCode, user.uid);
+    } catch (cancelError) {
+      if (cancelError?.code !== 'REQUEST_NOT_PENDING') {
+        setError(cancelError.message);
+      } else {
+        setLoading(false);
+        return;
+      }
+    } finally {
+      if (cancelled) {
+        localStorage.removeItem('aop_pending_request');
+        setPendingRequest(null);
+        setPendingRoomData(null);
+        setLoading(false);
+      } else setLoading(false);
+    }
+  };
+
+  const expirePending = async () => {
+    if (!user || !pendingRequest) return;
+    try {
+      await expireJoinRequest(pendingRequest.roomCode, user.uid, user.uid);
+    } catch (expireError) {
+      if (!['REQUEST_ACTIVE', 'REQUEST_NOT_PENDING'].includes(expireError?.code)) setError(expireError.message);
     }
   };
 
@@ -138,21 +249,29 @@ function App() {
     }
   };
 
-  const handleMapUpload = async (event) => {
-    const file = event.target.files?.[0];
+  const handleMapFile = async (file, directError = '') => {
+    if (directError) {
+      setError(directError);
+      return;
+    }
     if (!file || !user) return;
     setLoading(true);
     setError('');
     try {
-      const svgText = await file.text();
+      const svgText = await readSvgFile(file);
       const importedMap = importSvgMap(svgText);
       await setRoomMap(roomCode, user.uid, importedMap);
     } catch (mapError) {
       setError(`Harita yüklenemedi: ${mapError.message}`);
     } finally {
       setLoading(false);
-      event.target.value = '';
     }
+  };
+
+  const handleMapUpload = async (event) => {
+    const file = event.target.files?.[0];
+    await handleMapFile(file);
+    event.target.value = '';
   };
 
   const startGame = async () => {
@@ -178,6 +297,18 @@ function App() {
   }
 
   if (!effectiveRoom) {
+    if (pendingRequest) {
+      return (
+        <JoinRequestWaiting
+          roomCode={pendingRequest.roomCode}
+          nickname={pendingRequest.nickname}
+          request={pendingRoomData?.joinRequests?.[user.uid]}
+          loading={loading}
+          onCancel={cancelPending}
+          onExpire={expirePending}
+        />
+      );
+    }
     return (
       <LoginScreen
         nickname={nickname}
@@ -199,6 +330,7 @@ function App() {
         roomData={effectiveRoom}
         isHost={effectiveRoom.hostId === user.uid}
         handleMapUpload={handleMapUpload}
+        handleMapFile={handleMapFile}
         startGame={startGame}
         leaveRoom={leaveRoom}
         resetApp={resetApp}

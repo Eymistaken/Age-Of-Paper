@@ -7,6 +7,7 @@ import {
 import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
 import { MapViewer } from './MapViewer';
+import { JoinRequestCards } from './JoinRequestCards';
 
 function lastActiveMillis(value) {
   if (typeof value?.toMillis === 'function') return value.toMillis();
@@ -39,15 +40,25 @@ export const MobileGameRoom = ({
   finishTurn,
   skipPlayer,
   leaveRoom,
+  pendingJoinRequests,
+  approveRequest,
+  rejectRequest,
 }) => {
   const [activeTab, setActiveTab] = useState('orders');
   const [expanded, setExpanded] = useState(false);
   const [sheetHeight, setSheetHeight] = useState(null);
   const dragRef = useRef(null);
+  const activePlayerRef = useRef(null);
 
   useEffect(() => {
     if (selectedId) setActiveTab('orders');
   }, [selectedId]);
+
+  useEffect(() => {
+    if (activeTab === 'players') activePlayerRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [activeTab, currentPlayerId]);
+
+  const requestCount = pendingJoinRequests.length;
 
   const bounds = () => ({
     collapsed: Math.max(280, Math.min(window.innerHeight * 0.42, 390)),
@@ -117,6 +128,7 @@ export const MobileGameRoom = ({
             ['orders', 'Toprak', Icons.Map],
             ['players', 'Sıra', Icons.User],
             ['chat', 'Mesaj', Icons.Send],
+            ['requests', `İstek ${requestCount ? `(${requestCount})` : ''}`, Icons.User],
           ].map(([id, label, icon]) => (
             <button key={id} onClick={() => setActiveTab(id)} className={activeTab === id ? 'is-active' : ''}>
               <Icon p={icon} s={16}/>{label}
@@ -157,7 +169,7 @@ export const MobileGameRoom = ({
                 const active = playerId === currentPlayerId;
                 const offline = now - lastActiveMillis(player.lastActive) >= PRESENCE_OFFLINE_TIMEOUT;
                 return (
-                  <div key={playerId} className={`aop-mobile-player ${active ? 'is-active' : ''} ${offline ? 'is-offline' : ''}`}>
+                  <div ref={active ? activePlayerRef : null} key={playerId} className={`aop-mobile-player ${active ? 'is-active' : ''} ${offline ? 'is-offline' : ''}`}>
                     <span className="aop-player-seal" style={{ backgroundColor: player.color }}>{player.name[0]}</span>
                     <span className="min-w-0 flex-1"><strong>{player.name}</strong><small>{(player.money || 0).toLocaleString('tr-TR')} altın</small></span>
                     {active && <b>SIRA</b>}
@@ -181,9 +193,23 @@ export const MobileGameRoom = ({
               </div>
               <form onSubmit={submitMessage} className="aop-chat-form">
                 <input className="aop-input" maxLength={CHAT_MESSAGE_LIMIT} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Mesaj..."/>
-                <button className="aop-button-secondary" aria-label="Mesaj gönder"><Icon p={Icons.Send}/></button>
+                <button className="aop-button-secondary aop-chat-send" aria-label="Mesaj gönder"><Icon p={Icons.Send}/></button>
               </form>
             </div>
+          )}
+
+          {activeTab === 'requests' && (
+            <JoinRequestCards
+              requests={pendingJoinRequests}
+              roomData={roomData}
+              userId={me.id}
+              isHost={isHost}
+              now={now}
+              actionPending={actionPending}
+              onApprove={approveRequest}
+              onReject={rejectRequest}
+              compact
+            />
           )}
         </div>
       </section>

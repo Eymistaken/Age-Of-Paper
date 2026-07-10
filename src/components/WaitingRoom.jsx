@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import { MAX_PLAYERS } from '../constants';
 import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
@@ -48,12 +49,45 @@ export const WaitingRoom = ({
   roomData,
   isHost,
   handleMapUpload,
+  handleMapFile,
   startGame,
   leaveRoom,
   resetApp,
   loading,
   error,
-}) => (
+}) => {
+  const [dragActive, setDragActive] = useState(false);
+  const dragDepth = useRef(0);
+  const fileInput = useRef(null);
+  const preventFileNavigation = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  const onDragEnter = (event) => {
+    preventFileNavigation(event);
+    if (loading) return;
+    dragDepth.current += 1;
+    setDragActive(true);
+  };
+  const onDragLeave = (event) => {
+    preventFileNavigation(event);
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (!dragDepth.current) setDragActive(false);
+  };
+  const onDrop = (event) => {
+    preventFileNavigation(event);
+    dragDepth.current = 0;
+    setDragActive(false);
+    if (loading) return;
+    const files = [...(event.dataTransfer?.files || [])];
+    if (files.length !== 1) {
+      handleMapFile(null, 'Tek bir SVG dosyası bırakın.');
+      return;
+    }
+    handleMapFile(files[0]);
+  };
+
+  return (
   <div className="min-h-screen aop-desk text-[var(--aop-text)] overflow-y-auto">
     <header className="aop-lobby-header">
       <div className="flex items-center gap-3">
@@ -105,9 +139,12 @@ export const WaitingRoom = ({
                 {player.id === roomData.hostId && <span className="aop-host-badge">KURUCU</span>}
               </div>
             ))}
-            {[...Array(MAX_PLAYERS - players.length)].map((_, index) => (
-              <div key={index} className="aop-empty-player"><Icon p={Icons.User} s={14}/> Komutan bekleniyor</div>
-            ))}
+            {players.length < MAX_PLAYERS && (
+              <div className="aop-empty-player">
+                <Icon p={Icons.User} s={14}/>
+                {MAX_PLAYERS - players.length} boş komutan kontenjanı
+              </div>
+            )}
           </div>
         </section>
 
@@ -120,9 +157,27 @@ export const WaitingRoom = ({
 
           {isHost ? (
             <section className="space-y-3">
-              <label className="w-full aop-button-secondary min-h-12 px-5 py-3 flex items-center justify-center gap-2 cursor-pointer">
-                <Icon p={Icons.Map}/> {roomData.mapSvg ? 'Haritayı Değiştir' : 'SVG Harita Yükle'}
-                <input type="file" accept=".svg,image/svg+xml" onChange={handleMapUpload} className="hidden" disabled={loading}/>
+              <label
+                className={`aop-map-dropzone ${dragActive ? 'is-dragging' : ''} ${loading ? 'is-loading' : ''}`}
+                onDragEnter={onDragEnter}
+                onDragOver={preventFileNavigation}
+                onDragLeave={onDragLeave}
+                onDrop={onDrop}
+                onKeyDown={(event) => {
+                  if (!loading && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    fileInput.current?.click();
+                  }
+                }}
+                role="button"
+                tabIndex={loading ? -1 : 0}
+                aria-disabled={loading}
+                aria-busy={loading}
+              >
+                <Icon p={Icons.Map}/>
+                <span>{loading ? 'Harita işleniyor…' : 'SVG’yi buraya bırak veya dosya seç'}</span>
+                {roomData.mapSvg && !loading && <small>Yüklü haritayı değiştirir</small>}
+                <input ref={fileInput} type="file" accept=".svg,image/svg+xml" onChange={handleMapUpload} className="sr-only" disabled={loading}/>
               </label>
               <button
                 onClick={startGame}
@@ -142,4 +197,5 @@ export const WaitingRoom = ({
       </div>
     </main>
   </div>
-);
+  );
+};

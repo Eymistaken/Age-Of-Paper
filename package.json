@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:rules": "npx firebase-tools emulators:exec --only firestore \"vitest run --config vitest.rules.config.js\" --project demo-age-of-paper",
     "test:watch": "vitest",
     "preview": "vite preview"
   },
@@ -18,6 +19,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",

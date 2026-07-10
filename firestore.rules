@@ -47,6 +47,218 @@ service cloud.firestore {
         && request.resource.data.lastAction.at is timestamp;
     }
 
+    function validJoinRequestAction(type, requesterId) {
+      return request.resource.data.joinRequestAction is map
+        && request.resource.data.joinRequestAction.keys().hasOnly(['type', 'actorId', 'requesterId', 'at'])
+        && request.resource.data.joinRequestAction.type == type
+        && request.resource.data.joinRequestAction.actorId == request.auth.uid
+        && request.resource.data.joinRequestAction.requesterId == requesterId
+        && request.resource.data.joinRequestAction.at is timestamp;
+    }
+
+    function validJoinRequest(joinRequest, requesterId) {
+      return joinRequest is map
+        && joinRequest.keys().hasAll([
+          'uid', 'name', 'createdAt', 'expiresAt', 'updatedAt', 'status', 'requiredVoterIds',
+          'approvals', 'rejections', 'decisionAt', 'decidedBy'
+        ])
+        && joinRequest.keys().hasOnly([
+          'uid', 'name', 'createdAt', 'expiresAt', 'updatedAt', 'status', 'requiredVoterIds',
+          'approvals', 'rejections', 'decisionAt', 'decidedBy'
+        ])
+        && joinRequest.uid == requesterId
+        && joinRequest.name is string
+        && joinRequest.name.size() > 0
+        && joinRequest.name.size() <= 32
+        && joinRequest.createdAt is timestamp
+        && joinRequest.expiresAt is timestamp
+        && joinRequest.updatedAt is timestamp
+        && joinRequest.requiredVoterIds is list
+        && joinRequest.approvals is map
+        && joinRequest.rejections is map;
+    }
+
+    function isJoinRequestCreate() {
+      let uid = request.auth.uid;
+      let joinRequest = request.resource.data.joinRequests[uid];
+      let oldRequests = resource.data.get('joinRequests', {});
+      let replacesOld = uid in oldRequests;
+      return resource.data.phase == 'claiming'
+        && request.resource.data.phase == 'claiming'
+        && !(uid in resource.data.players)
+        && resource.data.players.size() < 10
+        && resource.data.claims.size() < resource.data.mapDefinition.regionIds.size()
+        && roomChangesOnly(['joinRequests', 'joinRequestAction'])
+        && request.resource.data.joinRequests.diff(oldRequests).affectedKeys().hasOnly([uid])
+        && request.resource.data.joinRequests.size() <= 20
+        && (!replacesOld
+          || oldRequests[uid].status != 'pending'
+          || oldRequests[uid].expiresAt <= request.time)
+        && validJoinRequest(joinRequest, uid)
+        && joinRequest.status == 'pending'
+        && joinRequest.createdAt <= request.time + duration.value(60, 's')
+        && joinRequest.createdAt >= request.time - duration.value(60, 's')
+        && joinRequest.expiresAt == joinRequest.createdAt + duration.value(600, 's')
+        && joinRequest.updatedAt == joinRequest.createdAt
+        && joinRequest.requiredVoterIds.toSet()
+          == resource.data.players.keys().toSet().difference([resource.data.hostId].toSet())
+        && joinRequest.approvals.size() == 0
+        && joinRequest.rejections.size() == 0
+        && joinRequest.decisionAt == null
+        && joinRequest.decidedBy == null
+        && validJoinRequestAction('create', uid);
+    }
+
+    function isJoinRequestVote() {
+      let requesterId = request.resource.data.joinRequestAction.requesterId;
+      let oldRequest = resource.data.joinRequests[requesterId];
+      let newRequest = request.resource.data.joinRequests[requesterId];
+      let voteType = request.resource.data.joinRequestAction.type;
+      return request.auth.uid in resource.data.players
+        && requesterId in resource.data.joinRequests
+        && oldRequest.status == 'pending'
+        && oldRequest.expiresAt > request.time
+        && oldRequest.requiredVoterIds.hasAny([request.auth.uid])
+        && roomChangesOnly(['joinRequests', 'joinRequestAction'])
+        && request.resource.data.joinRequests.diff(resource.data.joinRequests).affectedKeys().hasOnly([requesterId])
+        && newRequest.diff(oldRequest).affectedKeys().hasOnly(['approvals', 'rejections', 'updatedAt'])
+        && newRequest.status == 'pending'
+        && newRequest.approvals.diff(oldRequest.approvals).affectedKeys().hasOnly([request.auth.uid])
+        && newRequest.rejections.diff(oldRequest.rejections).affectedKeys().hasOnly([request.auth.uid])
+        && newRequest.updatedAt is timestamp
+        && ((voteType == 'approve'
+            && newRequest.approvals[request.auth.uid] == true
+            && !(request.auth.uid in newRequest.rejections))
+          || (voteType == 'reject'
+            && newRequest.rejections[request.auth.uid] == true
+            && !(request.auth.uid in newRequest.approvals)))
+        && validJoinRequestAction(voteType, requesterId);
+    }
+
+    function isJoinRequestClose(status, type) {
+      let requesterId = request.resource.data.joinRequestAction.requesterId;
+      let oldRequest = resource.data.joinRequests[requesterId];
+      let newRequest = request.resource.data.joinRequests[requesterId];
+      let mayClose = status == 'cancelled'
+        ? request.auth.uid == requesterId
+        : status == 'rejected'
+          ? request.auth.uid == resource.data.hostId
+          : (request.auth.uid == requesterId || request.auth.uid in resource.data.players)
+            && oldRequest.expiresAt <= request.time;
+      return requesterId in resource.data.joinRequests
+        && oldRequest.status == 'pending'
+        && mayClose
+        && roomChangesOnly(['joinRequests', 'joinRequestAction'])
+        && request.resource.data.joinRequests.diff(resource.data.joinRequests).affectedKeys().hasOnly([requesterId])
+        && newRequest.diff(oldRequest).affectedKeys().hasOnly(['status', 'updatedAt', 'decisionAt', 'decidedBy'])
+        && newRequest.status == status
+        && newRequest.updatedAt is timestamp
+        && newRequest.decisionAt is timestamp
+        && newRequest.decidedBy == request.auth.uid
+        && validJoinRequestAction(type, requesterId);
+    }
+
+    function isJoinRequestAccept() {
+      let requesterId = request.resource.data.joinRequestAction.requesterId;
+      let oldRequest = resource.data.joinRequests[requesterId];
+      let newRequest = request.resource.data.joinRequests[requesterId];
+      let effectiveVoters = oldRequest.requiredVoterIds.toSet()
+        .intersection(resource.data.players.keys().toSet())
+        .difference([resource.data.hostId].toSet());
+      let hostAccepts = request.auth.uid == resource.data.hostId;
+      let unanimous = effectiveVoters.size() > 0
+        && oldRequest.approvals.keys().toSet().hasAll(effectiveVoters)
+        && !oldRequest.rejections.keys().toSet().hasAny(effectiveVoters);
+      let newPlayer = request.resource.data.players[requesterId];
+      return resource.data.phase == 'claiming'
+        && request.resource.data.phase == 'claiming'
+        && request.auth.uid in resource.data.players
+        && requesterId in resource.data.joinRequests
+        && !(requesterId in resource.data.players)
+        && oldRequest.status == 'pending'
+        && oldRequest.expiresAt > request.time
+        && (hostAccepts || unanimous)
+        && resource.data.claims.size() < resource.data.mapDefinition.regionIds.size()
+        && roomChangesOnly(['players', 'turnOrder', 'joinRequests', 'joinRequestAction'])
+        && request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([requesterId])
+        && request.resource.data.players.size() == resource.data.players.size() + 1
+        && request.resource.data.players.size() <= 10
+        && validPlayer(newPlayer, requesterId)
+        && newPlayer.name == oldRequest.name
+        && newPlayer.money == 0
+        && newPlayer.income == 5000
+        && newPlayer.regionIds.size() == 0
+        && newPlayer.lastIncomeTurn == 0
+        && request.resource.data.turnOrder == resource.data.turnOrder.concat([requesterId])
+        && request.resource.data.joinRequests.diff(resource.data.joinRequests).affectedKeys().hasOnly([requesterId])
+        && newRequest.diff(oldRequest).affectedKeys().hasOnly(['status', 'updatedAt', 'decisionAt', 'decidedBy'])
+        && newRequest.status == 'accepted'
+        && newRequest.updatedAt is timestamp
+        && newRequest.decisionAt is timestamp
+        && newRequest.decidedBy == request.auth.uid
+        && validJoinRequestAction('accept', requesterId);
+    }
+
+    function isJoinRequestClear() {
+      let requesterId = request.resource.data.joinRequestAction.requesterId;
+      let oldRequest = resource.data.joinRequests[requesterId];
+      return requesterId in resource.data.joinRequests
+        && oldRequest.status != 'pending'
+        && (request.auth.uid == requesterId || request.auth.uid == resource.data.hostId)
+        && roomChangesOnly(['joinRequests', 'joinRequestAction'])
+        && request.resource.data.joinRequests.diff(resource.data.joinRequests).affectedKeys().hasOnly([requesterId])
+        && !(requesterId in request.resource.data.joinRequests)
+        && request.resource.data.joinRequests.size() == resource.data.joinRequests.size() - 1
+        && validJoinRequestAction('clear', requesterId);
+    }
+
+    function isJoinRequestOperation() {
+      let action = request.resource.data.joinRequestAction;
+      return action.type == 'create'
+        ? isJoinRequestCreate()
+        : (action.type == 'approve' || action.type == 'reject')
+          ? isJoinRequestVote()
+          : action.type == 'cancel'
+            ? isJoinRequestClose('cancelled', 'cancel')
+            : action.type == 'reject_request'
+              ? isJoinRequestClose('rejected', 'reject_request')
+              : action.type == 'expire'
+                ? isJoinRequestClose('expired', 'expire')
+                : action.type == 'accept'
+                  ? isJoinRequestAccept()
+                  : action.type == 'clear' && isJoinRequestClear();
+    }
+
+    function isGameActionOperation() {
+      let type = request.resource.data.lastAction.type;
+      return type == 'start'
+        ? isHostStart()
+        : type == 'leave'
+          ? isLeave()
+          : type == 'income'
+            ? isIncomeGrant()
+            : type == 'claim'
+              ? isClaim()
+              : type == 'end_turn'
+                ? isEndTurn()
+                : type == 'skip_offline' && isOfflineSkip();
+    }
+
+    function isValidRoomUpdate() {
+      let changes = request.resource.data.diff(resource.data).affectedKeys();
+      let joinActionChanged = changes.hasAny(['joinRequestAction']);
+      let gameActionChanged = changes.hasAny(['lastAction']);
+      return joinActionChanged
+        ? request.resource.data.joinRequestAction is map && isJoinRequestOperation()
+        : gameActionChanged
+          ? request.resource.data.lastAction is map && isGameActionOperation()
+          : changes.hasOnly(['players'])
+            ? (!(request.auth.uid in resource.data.players) ? isLobbyJoin() : isPresenceUpdate())
+            : changes.hasOnly(['mapSvg', 'mapDefinition', 'mapValidation'])
+              ? isHostMapUpdate()
+              : changes.hasOnly(['chat']) && isChatUpdate();
+    }
+
     function isLobbyJoin() {
       return resource.data.phase == 'lobby'
         && request.resource.data.phase == 'lobby'
@@ -55,7 +267,7 @@ service cloud.firestore {
         && roomChangesOnly(['players'])
         && request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([request.auth.uid])
         && request.resource.data.players.size() == resource.data.players.size() + 1
-        && request.resource.data.players.size() <= 4
+        && request.resource.data.players.size() <= 10
         && validPlayer(request.resource.data.players[request.auth.uid], request.auth.uid)
         && request.resource.data.players[request.auth.uid].money == 0
         && request.resource.data.players[request.auth.uid].income == 5000
@@ -216,11 +428,13 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.keys().hasAll([
           'schemaVersion', 'phase', 'hostId', 'createdAt', 'mapSvg', 'mapDefinition', 'mapValidation',
-          'players', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber', 'claims', 'chat', 'lastAction'
+          'players', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber', 'claims', 'chat', 'lastAction',
+          'joinRequests', 'joinRequestAction'
         ])
         && request.resource.data.keys().hasOnly([
           'schemaVersion', 'phase', 'hostId', 'createdAt', 'mapSvg', 'mapDefinition', 'mapValidation',
-          'players', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber', 'claims', 'chat', 'lastAction'
+          'players', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber', 'claims', 'chat', 'lastAction',
+          'joinRequests', 'joinRequestAction'
         ])
         && request.resource.data.schemaVersion == 2
         && request.resource.data.phase == 'lobby'
@@ -238,20 +452,11 @@ service cloud.firestore {
         && request.resource.data.roundNumber == 0
         && request.resource.data.claims.size() == 0
         && request.resource.data.chat.size() == 0
-        && request.resource.data.lastAction == null;
+        && request.resource.data.lastAction == null
+        && request.resource.data.joinRequests.size() == 0
+        && request.resource.data.joinRequestAction == null;
 
-      allow update: if signedIn() && (
-        isLobbyJoin()
-        || isPresenceUpdate()
-        || isHostMapUpdate()
-        || isHostStart()
-        || isLeave()
-        || isIncomeGrant()
-        || isClaim()
-        || isEndTurn()
-        || isOfflineSkip()
-        || isChatUpdate()
-      );
+      allow update: if signedIn() && isValidRoomUpdate();
 
       allow delete: if signedIn()
         && request.auth.uid in resource.data.players
