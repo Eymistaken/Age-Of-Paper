@@ -1,3 +1,5 @@
+import { summarizeRegionEconomy } from './pricing';
+
 export const SAFE_REGION_ID = /^[A-Za-z_][A-Za-z0-9_-]{0,79}$/;
 
 function issue(code, message, regionId) {
@@ -42,7 +44,7 @@ export function validateMapDefinition(mapDefinition) {
 
   if (regions.length === 0) {
     errors.push(issue('NO_REGIONS', 'Haritada oynanabilir bölge bulunamadı.'));
-    return { valid: false, errors, warnings, regionCount: 0 };
+    return { valid: false, errors, warnings, regionCount: 0, pricingSummary: null };
   }
 
   if (!Array.isArray(mapDefinition?.regionIds)) {
@@ -135,5 +137,6 @@ export function validateMapDefinition(mapDefinition) {
     errors,
     warnings,
     regionCount: regions.length,
+    pricingSummary: summarizeRegionEconomy(regions),
   };
 }

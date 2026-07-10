@@ -87,7 +87,17 @@ describe('local application flow smoke', () => {
     await render(<WaitingRoom
       roomCode="ABCD"
       players={[player]}
-      roomData={{ hostId: 'p1', mapSvg: claimingRoom.mapSvg, mapValidation: { valid: true, regionCount: 1, errors: [], warnings: [] } }}
+      roomData={{
+        hostId: 'p1',
+        mapSvg: claimingRoom.mapSvg,
+        mapValidation: {
+          valid: true,
+          regionCount: 1,
+          errors: [],
+          warnings: [],
+          pricingSummary: { minPrice: 5_000, medianPrice: 10_000, maxPrice: 20_000, minIncome: 500, maxIncome: 2_000 },
+        },
+      }}
       isHost
       handleMapUpload={() => {}}
       startGame={startGame}
@@ -97,6 +107,8 @@ describe('local application flow smoke', () => {
       error=""
     />);
     expect(container.textContent).toContain('1 oynanabilir bölge');
+    expect(container.textContent).toContain('Fiyat Aralığı');
+    expect(container.textContent).toContain('5.000–20.000');
     const startButton = [...container.querySelectorAll('button')].find((button) => button.textContent.includes('Toprak Edinmeyi Başlat'));
     await act(async () => startButton.click());
     expect(startGame).toHaveBeenCalledOnce();

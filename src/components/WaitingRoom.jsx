@@ -6,6 +6,8 @@ function ValidationSummary({ validation }) {
   if (!validation?.regionCount) {
     return <p className="aop-validation-note">Henüz oynanabilir bir harita yüklenmedi.</p>;
   }
+  const pricing = validation.pricingSummary;
+  const formatGold = (value) => Number(value).toLocaleString('tr-TR');
   return (
     <div className="space-y-3">
       <div className="aop-map-verdict">
@@ -14,6 +16,22 @@ function ValidationSummary({ validation }) {
           {validation.valid ? 'Doğrulandı' : 'Başlatılamaz'}
         </strong>
       </div>
+      {validation.valid && pricing && (
+        <div className="aop-pricing-ledger" aria-label="Harita ekonomisi özeti">
+          <span>
+            <small>Fiyat Aralığı</small>
+            <strong>{formatGold(pricing.minPrice)}–{formatGold(pricing.maxPrice)}</strong>
+          </span>
+          <span>
+            <small>Medyan</small>
+            <strong>{formatGold(pricing.medianPrice)}</strong>
+          </span>
+          <span>
+            <small>Gelir Aralığı</small>
+            <strong>{formatGold(pricing.minIncome)}–{formatGold(pricing.maxIncome)}</strong>
+          </span>
+        </div>
+      )}
       {validation.errors?.map((item, index) => (
         <p key={`${item.code}-${index}`} className="aop-validation-note is-error">{item.message}</p>
       ))}

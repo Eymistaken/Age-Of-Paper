@@ -14,6 +14,9 @@ describe('SVG map importer', () => {
       </svg>`;
     const result = importSvgMap(svg);
     expect(result.mapDefinition.regionIds).toEqual(['north_east', 'south']);
+    expect(result.mapDefinition.pricingVersion).toBe(2);
+    expect(result.mapDefinition.regionsById.north_east).toMatchObject({ price: 4000, income: 700 });
+    expect(result.mapDefinition.regionsById.south).toMatchObject({ price: 5000, income: 800 });
     expect(result.validation.valid).toBe(true);
     expect(result.sanitizedSvg).not.toContain('<script');
     expect(result.sanitizedSvg).not.toContain('onclick');
@@ -30,7 +33,31 @@ describe('SVG map importer', () => {
     globalThis.innerWidth = 2400;
     const wideViewport = importSvgMap(svg).mapDefinition;
     expect(wideViewport.regions).toEqual(narrowViewport.regions);
-    expect(wideViewport.importer).toBe('legacy-svg-v1');
+    expect(wideViewport.importer).toBe('legacy-svg-v2');
+    expect(wideViewport.pricingVersion).toBe(2);
+  });
+
+  it('ignores empty viewBox space and normalizes automatic prices by median region size', () => {
+    const svg = `<svg viewBox="0 0 10000 10000" xmlns="http://www.w3.org/2000/svg">
+      <rect id="small" data-region="true" data-neighbors="medium" x="0" y="0" width="5" height="5" />
+      <rect id="medium" data-region="true" data-neighbors="small large" x="5" y="0" width="10" height="10" />
+      <rect id="large" data-region="true" data-neighbors="medium" x="15" y="0" width="20" height="20" />
+    </svg>`;
+    const result = importSvgMap(svg);
+    expect(result.validation.valid).toBe(true);
+    expect(result.mapDefinition.regions.map((region) => region.price)).toEqual([5_000, 10_000, 20_000]);
+    expect(result.validation.pricingSummary).toMatchObject({ minPrice: 5_000, medianPrice: 10_000, maxPrice: 20_000 });
+  });
+
+  it('uses median pricing and a warning instead of treating an unmeasurable path as the viewBox', () => {
+    const svg = `<svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg">
+      <path id="relative" data-region="true" data-neighbors="absolute" d="m 10 10 h 20 v 20 a 400 300 0 1 1 50 50 z" />
+      <path id="absolute" data-region="true" data-neighbors="relative" d="M 0 0 H 30 V 30 C 900 800 700 600 30 30 Z" />
+    </svg>`;
+    const result = importSvgMap(svg);
+    expect(result.validation.valid).toBe(true);
+    expect(result.mapDefinition.regions.map((region) => region.price)).toEqual([10_000, 10_000]);
+    expect(result.validation.warnings.map((warning) => warning.code)).toContain('GEOMETRY_FALLBACK');
   });
 
   it('reports duplicate source IDs as invalid', () => {

@@ -126,6 +126,10 @@
 .aop-map-verdict { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--aop-line); }
 .aop-map-verdict strong { color: var(--aop-danger); }
 .aop-map-verdict strong.is-valid { color: #88a87a; }
+.aop-pricing-ledger { display: grid; grid-template-columns: 1.25fr .8fr 1.2fr; gap: 5px; }
+.aop-pricing-ledger > span { display: flex; min-width: 0; flex-direction: column; gap: 3px; padding: 8px 6px; border: 1px solid var(--aop-line); border-radius: 3px; background: var(--aop-panel-deep); text-align: center; }
+.aop-pricing-ledger small { overflow: hidden; color: var(--aop-muted); font-size: .57rem; font-weight: 700; letter-spacing: .03em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.aop-pricing-ledger strong { overflow: hidden; color: var(--aop-paper-light); font-size: .68rem; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .aop-validation-note, .aop-inline-error, .aop-claim-reason { margin: 0; padding: 10px 12px; border: 1px solid var(--aop-line); border-radius: 4px; background: var(--aop-panel-deep); color: var(--aop-muted); font-size: .8rem; line-height: 1.45; }
 .aop-validation-note.is-error, .aop-inline-error { border-color: var(--aop-danger); color: var(--aop-paper-light); }
 .aop-validation-note.is-warning { border-color: var(--aop-gold-deep); color: var(--aop-paper-light); }

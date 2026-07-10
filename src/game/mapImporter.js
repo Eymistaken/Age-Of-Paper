@@ -1,4 +1,6 @@
 import { SAFE_REGION_ID, validateMapDefinition } from './mapValidation';
+import { applyAutomaticPricing, PRICING_VERSION, summarizeRegionEconomy } from './pricing';
+import { boundsArea, measureRegionGeometry } from './svgGeometry';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const PLAYABLE_SELECTOR = 'path,polygon,rect,circle,ellipse,polyline';
@@ -37,44 +39,6 @@ function parseViewBox(svg) {
   const height = parseNumber(svg.getAttribute('height')) || 1000;
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   return { x: 0, y: 0, width, height };
-}
-
-function boundsFromPoints(numbers) {
-  const xs = [];
-  const ys = [];
-  for (let index = 0; index + 1 < numbers.length; index += 2) {
-    xs.push(numbers[index]);
-    ys.push(numbers[index + 1]);
-  }
-  if (!xs.length) return null;
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  return { x: minX, y: minY, width: Math.max(0, maxX - minX), height: Math.max(0, maxY - minY) };
-}
-
-function geometryBounds(element, viewBox) {
-  const tag = element.tagName.toLowerCase();
-  if (tag === 'rect') {
-    return {
-      x: parseNumber(element.getAttribute('x')) || 0,
-      y: parseNumber(element.getAttribute('y')) || 0,
-      width: Math.max(0, parseNumber(element.getAttribute('width')) || 0),
-      height: Math.max(0, parseNumber(element.getAttribute('height')) || 0),
-    };
-  }
-  if (tag === 'circle' || tag === 'ellipse') {
-    const cx = parseNumber(element.getAttribute('cx')) || 0;
-    const cy = parseNumber(element.getAttribute('cy')) || 0;
-    const rx = tag === 'circle' ? parseNumber(element.getAttribute('r')) || 0 : parseNumber(element.getAttribute('rx')) || 0;
-    const ry = tag === 'circle' ? rx : parseNumber(element.getAttribute('ry')) || 0;
-    return { x: cx - rx, y: cy - ry, width: rx * 2, height: ry * 2 };
-  }
-
-  const source = tag === 'path' ? element.getAttribute('d') : element.getAttribute('points');
-  const numbers = (source || '').match(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi)?.map(Number) || [];
-  return boundsFromPoints(numbers) || { ...viewBox };
 }
 
 function isExplicitDecoration(element) {
@@ -133,6 +97,7 @@ function splitNeighborIds(value) {
 }
 
 function boundsTouch(a, b, tolerance) {
+  if (!a || !b) return false;
   return !(
     a.x + a.width + tolerance < b.x ||
     b.x + b.width + tolerance < a.x ||
@@ -177,7 +142,6 @@ export function importSvgMap(svgText) {
     safeIds.add(id);
     if (!sourceToSafe.has(sourceId)) sourceToSafe.set(sourceId, id);
 
-    const bounds = geometryBounds(element, viewBox);
     const name = element.getAttribute('data-name') || element.getAttribute('name') || sourceId.replace(/[_-]+/g, ' ');
     const priceAttribute = element.getAttribute('data-price');
     const incomeAttribute = element.getAttribute('data-income');
@@ -189,9 +153,6 @@ export function importSvgMap(svgText) {
     if (incomeAttribute !== null && explicitIncome === null) {
       importIssues.push({ severity: 'error', code: 'INVALID_NUMBER', message: `“${name}” için data-income geçerli bir sayı değil.` });
     }
-    const areaRatio = Math.min(1, Math.max(0, bounds.width * bounds.height) / (viewBox.width * viewBox.height));
-    const price = explicitPrice ?? Math.ceil((4000 + areaRatio * 2_000_000) / 100) * 100;
-    const income = explicitIncome ?? Math.max(500, Math.round((price * 0.1) / 100) * 100);
     const commonNeighbors = element.getAttribute('data-neighbors');
     const claimValue = element.getAttribute('data-claim-neighbors') ?? commonNeighbors;
     const landValue = element.getAttribute('data-land-neighbors') ?? commonNeighbors;
@@ -202,23 +163,37 @@ export function importSvgMap(svgText) {
     element.setAttribute('data-name', name);
     element.classList.add('default-land');
 
-    if (element.hasAttribute('transform')) {
-      importIssues.push({ severity: 'warning', code: 'LEGACY_TRANSFORM', message: `“${name}” dönüşüm içeriyor; legacy komşuluk yaklaşık hesaplandı.` });
-    }
-
     records.push({
       element,
       sourceId,
       id,
       name,
-      price,
-      income,
+      explicitPrice,
+      explicitIncome,
       coastal: parseBoolean(element.getAttribute('data-coastal')) || /coast|coastal/i.test(element.getAttribute('class') || ''),
-      bounds,
       claimTokens: claimValue === null ? null : splitNeighborIds(claimValue),
       landTokens: landValue === null ? null : splitNeighborIds(landValue),
     });
   });
+
+  const geometry = measureRegionGeometry(svg, records, viewBox);
+  const priced = applyAutomaticPricing(records.map((record) => {
+    const bounds = geometry.boundsById.get(record.id) || null;
+    return { ...record, bounds, area: boundsArea(bounds) };
+  }));
+  const pricedRecords = priced.records;
+  if (geometry.unmeasuredIds.length) {
+    const names = records
+      .filter((record) => geometry.unmeasuredIds.includes(record.id))
+      .map((record) => record.name)
+      .slice(0, 5)
+      .join(', ');
+    importIssues.push({
+      severity: 'warning',
+      code: 'GEOMETRY_FALLBACK',
+      message: `${geometry.unmeasuredIds.length} bölgenin görsel ölçümü alınamadı (${names}). Fiyat için güvenli medyan fallback kullanıldı.`,
+    });
+  }
 
   const tolerance = Math.max(viewBox.width, viewBox.height) * 0.0125;
   const usedLegacyInference = records.some((record) => record.claimTokens === null || record.landTokens === null);
@@ -231,8 +206,8 @@ export function importSvgMap(svgText) {
   }
 
   const resolveTokens = (tokens) => unique(tokens.map((token) => sourceToSafe.get(token) || normalizeRegionId(token)));
-  const regions = records.map((record) => {
-    const inferred = records
+  const regions = pricedRecords.map((record) => {
+    const inferred = pricedRecords
       .filter((other) => other.id !== record.id && boundsTouch(record.bounds, other.bounds, tolerance))
       .map((other) => other.id);
     const claimNeighbors = record.claimTokens === null ? inferred : resolveTokens(record.claimTokens);
@@ -250,12 +225,14 @@ export function importSvgMap(svgText) {
 
   const mapDefinition = {
     version: 1,
+    pricingVersion: PRICING_VERSION,
     importedAt: Date.now(),
-    importer: usedLegacyInference ? 'legacy-svg-v1' : 'metadata-svg-v1',
+    importer: usedLegacyInference ? 'legacy-svg-v2' : 'metadata-svg-v2',
     viewBox,
     regionIds: regions.map((region) => region.id),
     regions,
     regionsById: Object.fromEntries(regions.map((region) => [region.id, region])),
+    pricingSummary: summarizeRegionEconomy(regions),
     importIssues,
   };
   const validation = validateMapDefinition(mapDefinition);
