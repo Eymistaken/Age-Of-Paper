@@ -1,74 +1,75 @@
+import { CHAT_MESSAGE_LIMIT, OFFLINE_SKIP_TIMEOUT, PRESENCE_OFFLINE_TIMEOUT } from '../../constants';
 import { Icon, Icons } from '../Icons';
-import { ACTIVE_TIMEOUT } from '../../constants';
+
+function lastActiveMillis(value) {
+  if (typeof value?.toMillis === 'function') return value.toMillis();
+  return typeof value === 'number' ? value : 0;
+}
 
 export const LeftPanel = ({
-    roomData,
-    currentPlayerId,
-    now,
-    msg,
-    setMsg,
-    sendMessage,
-    chatEndRef
+  roomData,
+  currentPlayerId,
+  isHost,
+  now,
+  skipPlayer,
+  actionPending,
+  message,
+  setMessage,
+  submitMessage,
+  chatEndRef,
 }) => {
-    return (
-        <div className="w-full md:w-72 h-[30vh] md:h-full bg-[var(--aop-panel)] border-b-2 md:border-b-0 md:border-r-2 border-[var(--aop-bronze)] flex flex-col z-20 shrink-0">
-            <div className="p-3 md:p-4 border-b border-[var(--aop-line)] bg-[var(--aop-panel-deep)] overflow-y-auto max-h-[52%] md:max-h-none">
-                <div className="mb-3 flex justify-between items-end gap-3">
-                    <div>
-                        <div className="aop-label">Tur Defteri</div>
-                        <h3 className="aop-title text-xl">Sıra</h3>
-                    </div>
-                </div>
-                <div className="space-y-2">
-                    {roomData.turnOrder.map((uid) => {
-                        const p = roomData.players[uid];
-                        if (!p) return null;
-                        const isActive = uid === currentPlayerId;
-                        const isOffline = (now - (p.lastActive || 0)) > ACTIVE_TIMEOUT;
-                        return (
-                            <div key={uid} className={`p-3 rounded flex items-center gap-3 border transition-all ${isActive ? 'aop-paper shadow-none' : 'bg-[var(--aop-panel)] border-[var(--aop-line)] opacity-80'} ${isOffline ? 'opacity-50 grayscale' : ''}`}>
-                                <div className="w-9 h-9 rounded-full aop-seal shrink-0 flex items-center justify-center text-sm font-bold" style={{backgroundColor: p.color}}>
-                                    {p.name[0]}
-                                </div>
-                                <div className="flex-1">
-                                    <div className={`font-bold text-sm flex justify-between items-center ${isActive ? 'text-[var(--aop-ink)]' : 'text-[var(--aop-text)]'}`}>
-                                        <span>{p.name}</span>
-                                        {isActive && !isOffline && <span className="text-[var(--aop-gold-deep)] text-xs">SIRA</span>}
-                                        {isOffline && <span className="text-[var(--aop-danger)] text-[10px] flex items-center gap-1"><Icon p={Icons.WifiOff} s={10}/></span>}
-                                    </div>
-                                    <div className={`text-xs ${isActive ? 'text-[var(--aop-ink-soft)]' : 'text-[var(--aop-muted)]'}`}>{p.money.toLocaleString()} altın</div>
-                                </div>
-                            </div>
-                        )
-                    })}
-                </div>
-            </div>
-            
-            <div className="flex-1 overflow-hidden flex flex-col">
-                <div className="px-3 pt-3 md:px-4">
-                    <div className="aop-label">İstihbarat Hattı</div>
-                </div>
-                <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-2 custom-scrollbar">
-                    {roomData.chat?.map((m, i) => (
-                        <div key={i} className="text-sm">
-                            <span style={{color: m.c}} className="font-bold text-xs block">{m.s}</span>
-                            <span className="text-[var(--aop-text)] bg-[var(--aop-panel-deep)] border border-[var(--aop-line)] px-2 py-1 rounded inline-block max-w-full break-words">{m.t}</span>
-                        </div>
-                    ))}
-                    <div ref={chatEndRef} />
-                </div>
-                <form onSubmit={sendMessage} className="p-2 bg-[var(--aop-panel-deep)] border-t border-[var(--aop-line)] flex gap-2">
-                    <input 
-                        className="flex-1 bg-[var(--aop-bg)] rounded px-2 py-2 text-sm text-[var(--aop-text)] border border-[var(--aop-line)] outline-none focus:border-[var(--aop-gold)]" 
-                        placeholder="Mesaj..." 
-                        value={msg} 
-                        onChange={e => setMsg(e.target.value)}
-                    />
-                    <button className="aop-button-secondary px-3 flex items-center">
-                        <Icon p={Icons.Send} s={16}/>
-                    </button>
-                </form>
-            </div>
+  const activeLastSeen = lastActiveMillis(roomData.players?.[currentPlayerId]?.lastActive);
+  const maySkip = isHost && currentPlayerId && now - activeLastSeen >= OFFLINE_SKIP_TIMEOUT;
+  return (
+    <aside className="aop-left-panel">
+      <section className="aop-player-ledger">
+        <div className="aop-label">Tur Defteri</div>
+        <h2 className="aop-title text-2xl mb-4">Komutanlar</h2>
+        <div className="space-y-2">
+          {roomData.turnOrder.map((playerId) => {
+            const player = roomData.players[playerId];
+            if (!player) return null;
+            const active = playerId === currentPlayerId;
+            const offline = now - lastActiveMillis(player.lastActive) >= PRESENCE_OFFLINE_TIMEOUT;
+            return (
+              <div key={playerId} className={`aop-player-row ${active ? 'is-active' : ''} ${offline ? 'is-offline' : ''}`}>
+                <span className="aop-player-seal" style={{ backgroundColor: player.color }}>{player.name[0]}</span>
+                <span className="min-w-0 flex-1"><strong>{player.name}</strong><small>{(player.money || 0).toLocaleString('tr-TR')} altın</small></span>
+                {active && <b>SIRA</b>}
+                {offline ? <Icon p={Icons.WifiOff} s={15}/> : null}
+              </div>
+            );
+          })}
         </div>
-    );
+        {maySkip && (
+          <button onClick={skipPlayer} disabled={actionPending} className="aop-skip-button">
+            Uzun Süredir Çevrimdışı, Sırayı Geç
+          </button>
+        )}
+      </section>
+
+      <section className="aop-chat-panel">
+        <div className="aop-label px-4 pt-4">İstihbarat Hattı</div>
+        <div className="aop-chat-messages custom-scrollbar">
+          {(roomData.chat || []).map((chat, index) => (
+            <div key={chat.id || `${chat.s}-${index}`} className="aop-chat-message">
+              <strong style={{ color: chat.senderColor || chat.c }}>{chat.senderName || chat.s}</strong>
+              <span>{chat.text || chat.t}</span>
+            </div>
+          ))}
+          <div ref={chatEndRef}/>
+        </div>
+        <form onSubmit={submitMessage} className="aop-chat-form">
+          <input
+            className="aop-input"
+            placeholder="Mesaj..."
+            maxLength={CHAT_MESSAGE_LIMIT}
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+          />
+          <button className="aop-button-secondary" aria-label="Mesaj gönder"><Icon p={Icons.Send} s={17}/></button>
+        </form>
+      </section>
+    </aside>
+  );
 };

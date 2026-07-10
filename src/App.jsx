@@ -1,212 +1,222 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from './config/firebase';
-import { doc, setDoc, getDoc, updateDoc, onSnapshot, deleteField, deleteDoc } from 'firebase/firestore';
-import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { HEARTBEAT_INTERVAL } from './constants';
+import { GameRoom } from './components/GameRoom';
 import { LoginScreen } from './components/LoginScreen';
 import { WaitingRoom } from './components/WaitingRoom';
-import { GameRoom } from './components/GameRoom';
-import { COLORS, STARTING_MONEY, MAX_PLAYERS, HEARTBEAT_INTERVAL } from './constants';
+import { importSvgMap } from './game/mapImporter';
+import { PHASES, resolvePhase } from './game/phases';
+import {
+  createRoom as createRoomTransaction,
+  joinRoom as joinRoomTransaction,
+  leaveRoom as leaveRoomTransaction,
+  setRoomMap,
+  startGame as startGameTransaction,
+  updatePresence,
+} from './services/roomService';
+
+function normalizeLegacyRoom(room) {
+  const phase = resolvePhase(room);
+  const claims = room.claims || Object.fromEntries(
+    Object.entries(room.gameData || {})
+      .filter(([, value]) => value?.owner)
+      .map(([regionId, value]) => [regionId, { ownerId: value.owner }]),
+  );
+  return { ...room, phase, claims };
+}
 
 function App() {
-    const [user, setUser] = useState(null);
-    const [roomCode, setRoomCode] = useState(localStorage.getItem('aop_room') || '');
-    const [roomData, setRoomData] = useState(null);
-    const [nickname, setNickname] = useState(localStorage.getItem('aop_nickname') || '');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
+  const [user, setUser] = useState(null);
+  const [roomCode, setRoomCode] = useState(localStorage.getItem('aop_room') || '');
+  const [roomData, setRoomData] = useState(null);
+  const [nickname, setNickname] = useState(localStorage.getItem('aop_nickname') || '');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-    useEffect(() => {
-        const unsub = onAuthStateChanged(auth, (u) => {
-            if (u) setUser(u);
-            else signInAnonymously(auth).catch(e => setError("Giriş Hatası: " + e.message));
-        });
-        return () => unsub();
-    }, []);
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+      if (nextUser) setUser(nextUser);
+      else signInAnonymously(auth).catch((authError) => setError(`Giriş hatası: ${authError.message}`));
+    });
+    return unsubscribe;
+  }, []);
 
-    useEffect(() => {
-        if (!user || !roomCode) return;
+  useEffect(() => {
+    if (!user || !roomCode) return undefined;
+    const unsubscribe = onSnapshot(doc(db, 'rooms', roomCode), (snapshot) => {
+      if (!snapshot.exists() || !snapshot.data().players?.[user.uid]) {
+        localStorage.removeItem('aop_room');
+        setRoomCode('');
+        setRoomData(null);
+        setError(snapshot.exists() ? 'Bu odada artık yer almıyorsun.' : 'Oda artık mevcut değil.');
+      } else {
+        setRoomData(snapshot.data());
+        localStorage.setItem('aop_room', roomCode);
+      }
+      setLoading(false);
+    }, (snapshotError) => {
+      console.error(snapshotError);
+      setLoading(false);
+      setError('Oda bağlantısı kurulamadı.');
+    });
+    return unsubscribe;
+  }, [roomCode, user]);
 
-        const unsub = onSnapshot(doc(db, 'rooms', roomCode), (docSnap) => {
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                if (!data.players[user.uid]) {
-                    localStorage.removeItem('aop_room');
-                    setRoomCode('');
-                    setRoomData(null);
-                    setError("Odadan ayrıldınız.");
-                } else {
-                    setRoomData(data);
-                    localStorage.setItem('aop_room', roomCode);
-                }
-            } else {
-                localStorage.removeItem('aop_room');
-                setRoomCode('');
-                setRoomData(null);
-            }
-            setLoading(false);
-        }, (err) => {
-            console.error(err);
-            setLoading(false);
-            localStorage.removeItem('aop_room');
-            setRoomCode('');
-            setError("Bağlantı koptu.");
-        });
-
-        return () => unsub();
-    }, [user, roomCode]);
-
-    useEffect(() => {
-        if(!user || !roomCode || !roomData) return;
-        const interval = setInterval(() => {
-            updateDoc(doc(db, 'rooms', roomCode), {
-                [`players.${user.uid}.lastActive`]: Date.now()
-            }).catch(e => console.log("Heartbeat fail", e));
-        }, HEARTBEAT_INTERVAL);
-        return () => clearInterval(interval);
-    }, [user, roomCode, roomData]);
-
-    const resetApp = () => {
-        localStorage.clear();
-        window.location.reload();
+  const isInRoom = Boolean(user && roomCode && roomData);
+  useEffect(() => {
+    if (!isInRoom) return undefined;
+    const heartbeat = () => {
+      if (document.visibilityState === 'visible') {
+        updatePresence(roomCode, user.uid).catch((presenceError) => console.warn('Presence güncellenemedi:', presenceError));
+      }
     };
-
-    const createRoom = async () => {
-        if (!nickname) return setError("Lütfen bir isim girin.");
-        setLoading(true);
-        setError("");
-        const code = Math.random().toString(36).substring(2, 6).toUpperCase();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Sunucu yanıt vermedi.")), 10000));
-        const writePromise = setDoc(doc(db, 'rooms', code), {
-            hostId: user.uid, status: 'lobby', mapSvg: '', turnIndex: 0, turnOrder: [],
-            isWar: false,
-            players: { 
-                [user.uid]: { 
-                    id: user.uid, 
-                    name: nickname, 
-                    color: COLORS[0], 
-                    money: STARTING_MONEY, 
-                    ready: true,
-                    lastActive: Date.now(),
-                    reserve: 0
-                } 
-            },
-            chat: [], gameData: {}
-        });
-        try {
-            await Promise.race([writePromise, timeoutPromise]);
-            localStorage.setItem('aop_nickname', nickname);
-            setRoomCode(code); 
-        } catch (e) { setError(e.message); setLoading(false); }
+    heartbeat();
+    const interval = window.setInterval(heartbeat, HEARTBEAT_INTERVAL);
+    document.addEventListener('visibilitychange', heartbeat);
+    window.addEventListener('focus', heartbeat);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', heartbeat);
+      window.removeEventListener('focus', heartbeat);
     };
+  }, [isInRoom, roomCode, user]);
 
-    const joinRoom = async (code) => {
-        if (!nickname || !code) return setError("Kod gerekli.");
-        setLoading(true);
-        const roomRef = doc(db, 'rooms', code);
-        try {
-            const snap = await getDoc(roomRef);
-            if (!snap.exists()) throw new Error("Oda bulunamadı.");
-            const data = snap.data();
-            if (Object.keys(data.players).length >= MAX_PLAYERS) throw new Error("Oda dolu.");
-            if (data.status === 'playing') throw new Error("Oyun başlamış.");
-            const playerIndex = Object.keys(data.players).length;
-            await updateDoc(roomRef, { 
-                [`players.${user.uid}`]: { 
-                    id: user.uid, 
-                    name: nickname, 
-                    color: COLORS[playerIndex], 
-                    money: STARTING_MONEY, 
-                    ready: true,
-                    lastActive: Date.now(),
-                    reserve: 0
-                } 
-            });
-            localStorage.setItem('aop_nickname', nickname);
-            setRoomCode(code);
-        } catch (e) { setError(e.message); setLoading(false); }
-    };
+  const effectiveRoom = useMemo(() => roomData && normalizeLegacyRoom(roomData), [roomData]);
 
-    const leaveRoom = async () => {
-        if (roomCode && user) {
-            try {
-                const roomRef = doc(db, 'rooms', roomCode);
-                await updateDoc(roomRef, { [`players.${user.uid}`]: deleteField() });
-                const snap = await getDoc(roomRef);
-                if (snap.exists() && Object.keys(snap.data().players || {}).length === 0) {
-                    await deleteDoc(roomRef);
-                }
-            } catch(e) { console.log("Çıkış hatası", e); }
-        }
-        setRoomCode(''); setRoomData(null); localStorage.removeItem('aop_room');
-    };
-
-    if (!user) {
-        return (
-            <div className="h-screen flex flex-col items-center justify-center text-[var(--aop-gold)] aop-desk">
-                <div className="aop-title text-3xl mb-2">Age of Paper</div>
-                <div className="mb-4 text-[var(--aop-muted)]">Savaş masasına bağlanıyor...</div>
-                <button onClick={resetApp} className="aop-button-secondary text-xs px-3 py-2 rounded">
-                    Sıfırla
-                </button>
-            </div>
-        );
+  const resetApp = async () => {
+    try {
+      if (roomCode && user) await leaveRoomTransaction(roomCode, user.uid);
+    } catch (resetError) {
+      console.warn('Sıfırlama sırasında oda kaydı temizlenemedi:', resetError);
+    } finally {
+      localStorage.removeItem('aop_room');
+      localStorage.removeItem('aop_nickname');
+      window.location.reload();
     }
+  };
 
-    if (!roomData) {
-        return (
-            <LoginScreen 
-                nickname={nickname}
-                setNickname={setNickname}
-                createRoom={createRoom}
-                joinRoom={joinRoom}
-                loading={loading}
-                error={error}
-                resetApp={resetApp}
-            />
-        );
+  const createRoom = async () => {
+    if (!user) return;
+    setLoading(true);
+    setError('');
+    try {
+      const code = await createRoomTransaction(user.uid, nickname);
+      localStorage.setItem('aop_nickname', nickname.trim());
+      setRoomCode(code);
+    } catch (createError) {
+      setError(createError.message);
+      setLoading(false);
     }
+  };
 
-    if (roomData.status === 'lobby') {
-        const players = Object.values(roomData.players);
-        const isHost = roomData.hostId === user.uid;
-
-        const handleMapUpload = (e) => {
-            const f = e.target.files[0];
-            if(f) {
-                const r = new FileReader();
-                r.onload = (ev) => updateDoc(doc(db, 'rooms', roomCode), { mapSvg: ev.target.result });
-                r.readAsText(f);
-            }
-        };
-
-        const startGame = async () => {
-            const shuffled = players.map(p => p.id).sort(() => Math.random() - 0.5);
-            await updateDoc(doc(db, 'rooms', roomCode), { status: 'playing', turnOrder: shuffled, turnIndex: 0 });
-        };
-
-        return (
-            <WaitingRoom 
-                roomCode={roomCode}
-                players={players}
-                roomData={roomData}
-                isHost={isHost}
-                handleMapUpload={handleMapUpload}
-                startGame={startGame}
-                leaveRoom={leaveRoom}
-                resetApp={resetApp}
-            />
-        );
+  const joinRoom = async (code) => {
+    if (!user) return;
+    setLoading(true);
+    setError('');
+    try {
+      const normalizedCode = await joinRoomTransaction(code, user.uid, nickname);
+      localStorage.setItem('aop_nickname', nickname.trim());
+      setRoomCode(normalizedCode);
+    } catch (joinError) {
+      setError(joinError.message);
+      setLoading(false);
     }
+  };
 
+  const leaveRoom = async () => {
+    try {
+      if (roomCode && user) await leaveRoomTransaction(roomCode, user.uid);
+    } catch (leaveError) {
+      console.warn('Odadan ayrılma tamamlanamadı:', leaveError);
+      setError(leaveError.message);
+    } finally {
+      setRoomCode('');
+      setRoomData(null);
+      localStorage.removeItem('aop_room');
+    }
+  };
+
+  const handleMapUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) return;
+    setLoading(true);
+    setError('');
+    try {
+      const svgText = await file.text();
+      const importedMap = importSvgMap(svgText);
+      await setRoomMap(roomCode, user.uid, importedMap);
+    } catch (mapError) {
+      setError(`Harita yüklenemedi: ${mapError.message}`);
+    } finally {
+      setLoading(false);
+      event.target.value = '';
+    }
+  };
+
+  const startGame = async () => {
+    if (!user) return;
+    setLoading(true);
+    setError('');
+    try {
+      await startGameTransaction(roomCode, user.uid);
+    } catch (startError) {
+      setError(startError.message);
+      setLoading(false);
+    }
+  };
+
+  if (!user) {
     return (
-        <GameRoom 
-            user={user} 
-            roomCode={roomCode} 
-            roomData={roomData} 
-            leaveRoom={leaveRoom} 
-            resetApp={resetApp} 
-        />
+      <div className="h-screen flex flex-col items-center justify-center text-[var(--aop-gold)] aop-desk">
+        <div className="aop-title text-3xl mb-2">Age of Paper</div>
+        <div className="mb-4 text-[var(--aop-muted)]">Harita masasına bağlanıyor...</div>
+        <button onClick={resetApp} className="aop-button-secondary min-h-11 px-3 py-2">Sıfırla</button>
+      </div>
     );
+  }
+
+  if (!effectiveRoom) {
+    return (
+      <LoginScreen
+        nickname={nickname}
+        setNickname={setNickname}
+        createRoom={createRoom}
+        joinRoom={joinRoom}
+        loading={loading}
+        error={error}
+        resetApp={resetApp}
+      />
+    );
+  }
+
+  if (effectiveRoom.phase === PHASES.LOBBY) {
+    return (
+      <WaitingRoom
+        roomCode={roomCode}
+        players={Object.values(effectiveRoom.players || {})}
+        roomData={effectiveRoom}
+        isHost={effectiveRoom.hostId === user.uid}
+        handleMapUpload={handleMapUpload}
+        startGame={startGame}
+        leaveRoom={leaveRoom}
+        resetApp={resetApp}
+        loading={loading}
+        error={error}
+      />
+    );
+  }
+
+  return (
+    <GameRoom
+      user={user}
+      roomCode={roomCode}
+      roomData={effectiveRoom}
+      leaveRoom={leaveRoom}
+      resetApp={resetApp}
+    />
+  );
 }
 
 export default App;

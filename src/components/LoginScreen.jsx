@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Icon, Icons } from './Icons';
 
 export const LoginScreen = ({ 
@@ -9,6 +10,8 @@ export const LoginScreen = ({
     error, 
     resetApp 
 }) => {
+    const [code, setCode] = useState('');
+
     return (
         <div className="min-h-screen flex flex-col items-center justify-center aop-desk p-4 relative overflow-hidden">
             <button 
@@ -24,7 +27,7 @@ export const LoginScreen = ({
                     Age of Paper
                     </h1>
                     <p className="mt-3 text-sm text-[var(--aop-muted)]">
-                        Komutan adını yaz, yeni sefer başlat veya oda koduyla masaya katıl.
+                        Komutan adını yaz, yeni harita masası kur veya oda koduyla katıl.
                     </p>
                 </div>
                 {error && (
@@ -47,7 +50,7 @@ export const LoginScreen = ({
                         disabled={loading} 
                         className="w-full aop-button py-4 text-xl"
                     >
-                        {loading ? "Masa hazırlanıyor..." : "Yeni Savaş Masası Kur"}
+                        {loading ? "Masa hazırlanıyor..." : "Yeni Harita Masası Kur"}
                     </button>
                     <div className="flex items-center gap-3">
                         <div className="flex-grow border-t aop-divider"></div>
@@ -56,13 +59,14 @@ export const LoginScreen = ({
                     </div>
                     <div className="grid grid-cols-[1fr_auto] gap-2">
                         <input 
-                            id="codeIn" 
                             className="aop-input text-center uppercase" 
                             placeholder="KOD" 
                             maxLength={4}
+                            value={code}
+                            onChange={event => setCode(event.target.value.toUpperCase())}
                         />
                         <button 
-                            onClick={() => joinRoom(document.getElementById('codeIn').value.toUpperCase())} 
+                            onClick={() => joinRoom(code)}
                             disabled={loading} 
                             className="aop-button-secondary font-bold px-6 rounded"
                         >

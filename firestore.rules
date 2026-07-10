@@ -1,88 +1,261 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Yardımcı Fonksiyonlar
-    function isPlayer(uid) {
-      return request.auth != null && request.auth.uid == uid;
+    function signedIn() {
+      return request.auth != null;
     }
-    
-    function isTurnOwner() {
-      // Turn Index sınırlarını kontrol et ve sıranın oyuncuda olduğunu doğrula
-      return resource.data.turnOrder.size() > 0 &&
-             resource.data.turnIndex >= 0 &&
-             resource.data.turnIndex < resource.data.turnOrder.size() &&
-             resource.data.turnOrder[resource.data.turnIndex] == request.auth.uid;
+
+    function roomChangesOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    function validPlayer(player, uid) {
+      return player is map
+        && player.keys().hasAll(['id', 'name', 'color', 'money', 'income', 'regionIds', 'joinedAt', 'lastActive', 'lastIncomeTurn'])
+        && player.keys().hasOnly(['id', 'name', 'color', 'money', 'income', 'regionIds', 'joinedAt', 'lastActive', 'lastIncomeTurn'])
+        && player.id == uid
+        && player.name is string
+        && player.name.size() > 0
+        && player.name.size() <= 32
+        && player.color is string
+        && player.money is number
+        && player.money >= 0
+        && player.income is number
+        && player.income >= 5000
+        && player.regionIds is list
+        && player.joinedAt is timestamp
+        && player.lastActive is timestamp
+        && player.lastIncomeTurn is int
+        && player.lastIncomeTurn >= 0;
+    }
+
+    function activePlayerId() {
+      return resource.data.turnOrder[resource.data.turnIndex];
+    }
+
+    function validTurnAdvance() {
+      let nextIndex = (resource.data.turnIndex + 1) % resource.data.turnOrder.size();
+      return request.resource.data.turnIndex == nextIndex
+        && request.resource.data.turnNumber == resource.data.turnNumber + 1
+        && request.resource.data.roundNumber == resource.data.roundNumber + (nextIndex == 0 ? 1 : 0);
+    }
+
+    function validAction(type) {
+      return request.resource.data.lastAction is map
+        && request.resource.data.lastAction.type == type
+        && request.resource.data.lastAction.actorId == request.auth.uid
+        && request.resource.data.lastAction.at is timestamp;
+    }
+
+    function isLobbyJoin() {
+      return resource.data.phase == 'lobby'
+        && request.resource.data.phase == 'lobby'
+        && !(request.auth.uid in resource.data.players)
+        && request.auth.uid in request.resource.data.players
+        && roomChangesOnly(['players'])
+        && request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([request.auth.uid])
+        && request.resource.data.players.size() == resource.data.players.size() + 1
+        && request.resource.data.players.size() <= 4
+        && validPlayer(request.resource.data.players[request.auth.uid], request.auth.uid)
+        && request.resource.data.players[request.auth.uid].money == 0
+        && request.resource.data.players[request.auth.uid].income == 5000
+        && request.resource.data.players[request.auth.uid].regionIds.size() == 0;
+    }
+
+    function isPresenceUpdate() {
+      return request.auth.uid in resource.data.players
+        && request.auth.uid in request.resource.data.players
+        && roomChangesOnly(['players'])
+        && request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([request.auth.uid])
+        && request.resource.data.players[request.auth.uid].diff(resource.data.players[request.auth.uid]).affectedKeys().hasOnly(['lastActive'])
+        && request.resource.data.players[request.auth.uid].lastActive == request.time;
+    }
+
+    function isHostMapUpdate() {
+      return resource.data.phase == 'lobby'
+        && resource.data.hostId == request.auth.uid
+        && roomChangesOnly(['mapSvg', 'mapDefinition', 'mapValidation'])
+        && request.resource.data.mapSvg is string
+        && request.resource.data.mapSvg.size() > 0
+        && request.resource.data.mapDefinition is map
+        && request.resource.data.mapDefinition.version == 1
+        && request.resource.data.mapDefinition.regionIds is list
+        && request.resource.data.mapDefinition.regionsById is map
+        && request.resource.data.mapValidation is map;
+    }
+
+    function isHostStart() {
+      return resource.data.phase == 'lobby'
+        && resource.data.hostId == request.auth.uid
+        && resource.data.mapValidation.valid == true
+        && roomChangesOnly(['phase', 'players', 'claims', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber', 'lastAction'])
+        && request.resource.data.phase == 'claiming'
+        && request.resource.data.claims.size() == 0
+        && request.resource.data.turnOrder is list
+        && request.resource.data.turnOrder.size() == resource.data.players.size()
+        && request.resource.data.turnOrder.toSet() == resource.data.players.keys().toSet()
+        && request.resource.data.turnIndex == 0
+        && request.resource.data.turnNumber == 1
+        && request.resource.data.roundNumber == 1
+        && validAction('start');
+    }
+
+    function isLeave() {
+      let wasInOrder = resource.data.turnOrder.hasAny([request.auth.uid]);
+      let releasesClaims = resource.data.phase == 'claiming';
+      let departingRegions = resource.data.players[request.auth.uid].regionIds;
+      return request.auth.uid in resource.data.players
+        && !(request.auth.uid in request.resource.data.players)
+        && roomChangesOnly(['players', 'claims', 'hostId', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber', 'lastAction'])
+        && request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([request.auth.uid])
+        && request.resource.data.players.size() == resource.data.players.size() - 1
+        && (releasesClaims
+          ? request.resource.data.claims.diff(resource.data.claims).affectedKeys() == departingRegions.toSet()
+            && request.resource.data.claims.size() == resource.data.claims.size() - departingRegions.size()
+          : request.resource.data.claims == resource.data.claims)
+        && request.resource.data.turnOrder is list
+        && !request.resource.data.turnOrder.hasAny([request.auth.uid])
+        && request.resource.data.turnOrder.size() == resource.data.turnOrder.size() - (wasInOrder ? 1 : 0)
+        && request.resource.data.hostId in request.resource.data.players
+        && (resource.data.hostId == request.auth.uid || request.resource.data.hostId == resource.data.hostId)
+        && validAction('leave');
+    }
+
+    function isIncomeGrant() {
+      let oldPlayer = resource.data.players[request.auth.uid];
+      let newPlayer = request.resource.data.players[request.auth.uid];
+      return resource.data.phase == 'claiming'
+        && activePlayerId() == request.auth.uid
+        && roomChangesOnly(['players', 'lastAction'])
+        && request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([request.auth.uid])
+        && newPlayer.diff(oldPlayer).affectedKeys().hasOnly(['money', 'lastIncomeTurn'])
+        && oldPlayer.lastIncomeTurn < resource.data.turnNumber
+        && newPlayer.lastIncomeTurn == resource.data.turnNumber
+        && newPlayer.money == oldPlayer.money + oldPlayer.income
+        && validAction('income');
+    }
+
+    function isClaim() {
+      let regionId = request.resource.data.lastAction.regionId;
+      let region = resource.data.mapDefinition.regionsById[regionId];
+      let oldPlayer = resource.data.players[request.auth.uid];
+      let newPlayer = request.resource.data.players[request.auth.uid];
+      let completesMap = request.resource.data.claims.size() == resource.data.mapDefinition.regionIds.size();
+      return resource.data.phase == 'claiming'
+        && activePlayerId() == request.auth.uid
+        && validAction('claim')
+        && regionId in resource.data.mapDefinition.regionsById
+        && !(regionId in resource.data.claims)
+        && request.resource.data.claims.diff(resource.data.claims).affectedKeys().hasOnly([regionId])
+        && request.resource.data.claims.size() == resource.data.claims.size() + 1
+        && request.resource.data.claims[regionId].keys().hasOnly(['ownerId', 'claimedAtTurn'])
+        && request.resource.data.claims[regionId].ownerId == request.auth.uid
+        && request.resource.data.claims[regionId].claimedAtTurn == resource.data.turnNumber
+        && request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([request.auth.uid])
+        && newPlayer.diff(oldPlayer).affectedKeys().hasOnly(['money', 'income', 'regionIds'])
+        && newPlayer.money == oldPlayer.money - region.price
+        && newPlayer.money >= 0
+        && newPlayer.income == oldPlayer.income + region.income
+        && newPlayer.regionIds.size() == oldPlayer.regionIds.size() + 1
+        && newPlayer.regionIds.toSet().hasAll(oldPlayer.regionIds.toSet())
+        && newPlayer.regionIds.hasAll([regionId])
+        && (oldPlayer.regionIds.size() == 0 || region.claimNeighbors.hasAny(oldPlayer.regionIds))
+        && roomChangesOnly(['phase', 'players', 'claims', 'turnIndex', 'turnNumber', 'roundNumber', 'lastAction'])
+        && (completesMap
+          ? request.resource.data.phase == 'claim_complete'
+            && request.resource.data.turnIndex == resource.data.turnIndex
+            && request.resource.data.turnNumber == resource.data.turnNumber
+            && request.resource.data.roundNumber == resource.data.roundNumber
+          : request.resource.data.phase == 'claiming' && validTurnAdvance());
+    }
+
+    function isEndTurn() {
+      return resource.data.phase == 'claiming'
+        && activePlayerId() == request.auth.uid
+        && request.resource.data.phase == 'claiming'
+        && roomChangesOnly(['turnIndex', 'turnNumber', 'roundNumber', 'lastAction'])
+        && validAction('end_turn')
+        && validTurnAdvance();
+    }
+
+    function isOfflineSkip() {
+      let targetId = activePlayerId();
+      return resource.data.phase == 'claiming'
+        && resource.data.hostId == request.auth.uid
+        && request.resource.data.phase == 'claiming'
+        && roomChangesOnly(['turnIndex', 'turnNumber', 'roundNumber', 'lastAction'])
+        && validAction('skip_offline')
+        && request.resource.data.lastAction.targetId == targetId
+        && resource.data.players[targetId].lastActive + duration.value(120, 's') <= request.time
+        && validTurnAdvance();
+    }
+
+    function isChatUpdate() {
+      let chat = request.resource.data.chat;
+      let message = chat[chat.size() - 1];
+      return request.auth.uid in resource.data.players
+        && roomChangesOnly(['chat'])
+        && chat is list
+        && chat.size() > 0
+        && chat.size() <= 80
+        && message is map
+        && message.keys().hasOnly(['id', 'senderId', 'senderName', 'senderColor', 'text', 'createdAt'])
+        && message.id is string
+        && message.senderId == request.auth.uid
+        && message.senderName == resource.data.players[request.auth.uid].name
+        && message.senderColor == resource.data.players[request.auth.uid].color
+        && message.text is string
+        && message.text.size() > 0
+        && message.text.size() <= 160
+        && message.createdAt is int;
     }
 
     match /rooms/{roomCode} {
-      allow read: if request.auth != null;
-      
-      allow create: if request.auth != null 
-                    && request.resource.data.hostId == request.auth.uid
-                    && request.resource.data.players[request.auth.uid].money == 0; // Başlangıç parası 0 olmalı
+      allow read: if signedIn();
 
-      allow update: if request.auth != null && (
-        
-        // 1. OYUNCU VERİSİ İZOLASYONU
-        // Sadece kendi player verisini değiştirebilir/ekleyebilir.
-        request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([request.auth.uid])
-        
-        && (
-          // OYUNCU MEVCUT MU? (JOIN VS PLAY)
-          (request.auth.uid in resource.data.players) 
-          ? (
-            // === MEVCUT OYUNCU İŞLEMLERİ ===
+      allow create: if signedIn()
+        && request.resource.data.keys().hasAll([
+          'schemaVersion', 'phase', 'hostId', 'createdAt', 'mapSvg', 'mapDefinition', 'mapValidation',
+          'players', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber', 'claims', 'chat', 'lastAction'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'schemaVersion', 'phase', 'hostId', 'createdAt', 'mapSvg', 'mapDefinition', 'mapValidation',
+          'players', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber', 'claims', 'chat', 'lastAction'
+        ])
+        && request.resource.data.schemaVersion == 2
+        && request.resource.data.phase == 'lobby'
+        && request.resource.data.hostId == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.mapSvg == ''
+        && request.resource.data.mapDefinition == null
+        && request.resource.data.players.size() == 1
+        && validPlayer(request.resource.data.players[request.auth.uid], request.auth.uid)
+        && request.resource.data.players[request.auth.uid].money == 0
+        && request.resource.data.players[request.auth.uid].income == 5000
+        && request.resource.data.turnOrder.size() == 0
+        && request.resource.data.turnIndex == 0
+        && request.resource.data.turnNumber == 0
+        && request.resource.data.roundNumber == 0
+        && request.resource.data.claims.size() == 0
+        && request.resource.data.chat.size() == 0
+        && request.resource.data.lastAction == null;
 
-            // 2. GELİR KONTROLÜ (MONEY INCREASE)
-            (request.resource.data.players[request.auth.uid].money > resource.data.players[request.auth.uid].money) 
-            ? (
-                (resource.data.turnOrder.size() == 1 || request.resource.data.turnIndex != resource.data.turnIndex) &&
-                (request.resource.data.players[request.auth.uid].money - resource.data.players[request.auth.uid].money) <= 50000
-              ) 
-            : true
-            
-            &&
-            
-            // 3. HARCAMA TUTARLILIĞI (MONEY DECREASE)
-            ((resource.data.players[request.auth.uid].money > request.resource.data.players[request.auth.uid].money) 
-            ? (
-                // DURUM A: Asker Üretimi
-                (
-                  (resource.data.players[request.auth.uid].money - request.resource.data.players[request.auth.uid].money) == 10000 &&
-                  request.resource.data.players[request.auth.uid].reserve == resource.data.players[request.auth.uid].reserve + 1000
-                )
-                ||
-                // DURUM B: Liman İnşası
-                (
-                  (resource.data.players[request.auth.uid].money - request.resource.data.players[request.auth.uid].money) == 90000 &&
-                  request.resource.data.gameData != resource.data.gameData
-                )
-                ||
-                // DURUM C: Toprak Satın Alma
-                (
-                  request.resource.data.gameData != resource.data.gameData
-                )
-              )
-            : true)
-
-            &&
-            
-            // 4. OYUN YAPISI VE SIRA KONTROLÜ
-            ((request.resource.data.gameData != resource.data.gameData) 
-            ? isTurnOwner() 
-            : true)
-
-          ) 
-          : (
-            // === YENİ KATILAN OYUNCU (JOIN) ===
-            // Katılırken para 0 olmalı
-            request.resource.data.players[request.auth.uid].money == 0
-          )
-        )
+      allow update: if signedIn() && (
+        isLobbyJoin()
+        || isPresenceUpdate()
+        || isHostMapUpdate()
+        || isHostStart()
+        || isLeave()
+        || isIncomeGrant()
+        || isClaim()
+        || isEndTurn()
+        || isOfflineSkip()
+        || isChatUpdate()
       );
-      
-      allow delete: if request.auth != null && resource.data.hostId == request.auth.uid;
+
+      allow delete: if signedIn()
+        && request.auth.uid in resource.data.players
+        && resource.data.players.size() == 1;
     }
   }
 }
