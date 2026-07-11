@@ -1,12 +1,32 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+} from 'react';
+import {
+  cameraToTransform,
+  clampCamera,
+  fitBoundsCamera,
+  normalizeBounds,
+  normalizeVisibleRect,
+  panCamera,
+  unionBounds,
+  zoomCameraAt,
+} from '../game/camera';
+import { createFocusState, reduceFocusSnapshot } from '../game/cameraFocus';
 import { sanitizeSvgMarkup } from '../game/mapImporter';
 import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
 
-const MIN_SCALE = 0.75;
-const MAX_SCALE = 6;
+const FOCUS_HOLD_MS = 1000;
 
-export const MapViewer = ({
+function reducedMotion() {
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+}
+
+export const MapViewer = forwardRef(function MapViewer({
   roomData,
   roomCode,
   selectedId,
@@ -14,17 +34,26 @@ export const MapViewer = ({
   legalClaims = [],
   currentPlayer,
   leaveRoom,
+  localPlayerId,
   hideHud = false,
   className = '',
-}) => {
-  const [scale, setScale] = useState(1);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [dragging, setDragging] = useState(false);
+}, forwardedRef) {
   const containerRef = useRef(null);
+  const transformRef = useRef(null);
   const svgRef = useRef(null);
-  const dragRef = useRef(null);
-  const touchRef = useRef(null);
+  const cameraRef = useRef(null);
+  const baseCameraRef = useRef(null);
+  const visibleRectRef = useRef({ x: 0, y: 0, width: 1, height: 1 });
+  const mapBoundsRef = useRef({ x: 0, y: 0, width: 1000, height: 1000 });
+  const manualRef = useRef(false);
+  const pointersRef = useRef(new Map());
+  const gestureRef = useRef(null);
   const significantDrag = useRef(false);
+  const animationRef = useRef(null);
+  const focusTimerRef = useRef(null);
+  const localRestoreRef = useRef(null);
+  const focusStateRef = useRef(createFocusState(roomData, { activePlayerId: null }));
+
   const safeMapSvg = useMemo(() => {
     try {
       return roomData.mapSvg ? sanitizeSvgMarkup(roomData.mapSvg) : '';
@@ -40,33 +69,99 @@ export const MapViewer = ({
   })), [roomData.claims, roomData.mapDefinition?.regionIds, roomData.players]);
   const legalFingerprint = useMemo(() => [...legalClaims].sort().join('|'), [legalClaims]);
 
-  const clampPosition = (next, nextScale = scale) => {
-    const rectangle = containerRef.current?.getBoundingClientRect();
-    if (!rectangle) return next;
-    if (nextScale <= 1) {
-      return { x: (rectangle.width * (1 - nextScale)) / 2, y: (rectangle.height * (1 - nextScale)) / 2 };
+  const stopTimers = () => {
+    window.clearTimeout(focusTimerRef.current);
+    focusTimerRef.current = null;
+    animationRef.current = null;
+  };
+
+  const renderCamera = (camera, animate = false) => {
+    if (!camera || !transformRef.current) return;
+    const clamped = clampCamera(camera, mapBoundsRef.current, visibleRectRef.current);
+    cameraRef.current = clamped;
+    const transform = cameraToTransform(clamped, visibleRectRef.current);
+    transformRef.current.style.transition = animate && !reducedMotion()
+      ? 'transform 480ms cubic-bezier(.22,1,.36,1)'
+      : 'none';
+    transformRef.current.style.transform = `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})`;
+  };
+
+  const fitMap = (markManual = true) => {
+    const camera = fitBoundsCamera(mapBoundsRef.current, visibleRectRef.current, 16);
+    manualRef.current = markManual;
+    baseCameraRef.current = camera;
+    localRestoreRef.current = null;
+    stopTimers();
+    renderCamera(camera, true);
+  };
+
+  const regionBounds = (regionIds) => {
+    const definitions = roomData.mapDefinition?.regionsById || {};
+    const values = regionIds.map((id) => {
+      if (definitions[id]?.bounds) return definitions[id].bounds;
+      const element = [...(svgRef.current?.querySelectorAll('[data-region-id]') || [])]
+        .find((candidate) => candidate.getAttribute('data-region-id') === id);
+      try {
+        const bounds = element?.getBBox?.();
+        return bounds && bounds.width >= 0 ? bounds : null;
+      } catch {
+        return null;
+      }
+    });
+    return unionBounds(values, mapBoundsRef.current);
+  };
+
+  const focusBounds = (bounds, { restoreAfter = false, local = false, onRestored } = {}) => {
+    if (!bounds) return;
+    stopTimers();
+    if (local) localRestoreRef.current = { ...baseCameraRef.current };
+    const target = fitBoundsCamera(bounds, visibleRectRef.current, Math.min(42, visibleRectRef.current.width * 0.09));
+    animationRef.current = { bounds, target, kind: 'focus' };
+    renderCamera(target, true);
+    if (restoreAfter) {
+      focusTimerRef.current = window.setTimeout(() => {
+        const base = baseCameraRef.current;
+        animationRef.current = { target: base, kind: 'restore' };
+        renderCamera(base, true);
+        focusTimerRef.current = window.setTimeout(() => {
+          animationRef.current = null;
+          onRestored?.();
+        }, reducedMotion() ? 0 : 500);
+      }, reducedMotion() ? 40 : FOCUS_HOLD_MS);
     }
-    return {
-      x: Math.min(0, Math.max(rectangle.width * (1 - nextScale), next.x)),
-      y: Math.min(0, Math.max(rectangle.height * (1 - nextScale), next.y)),
-    };
   };
 
-  const zoomTo = (nextScale, anchor) => {
-    const normalizedScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, nextScale));
-    const rectangle = containerRef.current?.getBoundingClientRect();
-    if (!rectangle) return;
-    const point = anchor || { x: rectangle.width / 2, y: rectangle.height / 2 };
-    const worldX = (point.x - position.x) / scale;
-    const worldY = (point.y - position.y) / scale;
-    setPosition(clampPosition({ x: point.x - worldX * normalizedScale, y: point.y - worldY * normalizedScale }, normalizedScale));
-    setScale(normalizedScale);
+  const cancelAutomationForManualInput = () => {
+    stopTimers();
+    manualRef.current = true;
+    baseCameraRef.current = { ...cameraRef.current };
+    localRestoreRef.current = null;
   };
 
-  const fitMap = () => {
-    setScale(1);
-    setPosition({ x: 0, y: 0 });
-  };
+  useImperativeHandle(forwardedRef, () => ({
+    setVisibleMapRect(rect) {
+      visibleRectRef.current = normalizeVisibleRect(rect);
+      if (!cameraRef.current) {
+        fitMap(false);
+        return;
+      }
+      if (animationRef.current?.bounds) {
+        const target = fitBoundsCamera(animationRef.current.bounds, visibleRectRef.current, 28);
+        animationRef.current.target = target;
+        renderCamera(target, false);
+      } else if (!manualRef.current) {
+        const fitted = fitBoundsCamera(mapBoundsRef.current, visibleRectRef.current, 16);
+        baseCameraRef.current = fitted;
+        renderCamera(fitted, false);
+      } else {
+        renderCamera(cameraRef.current, false);
+        baseCameraRef.current = { ...cameraRef.current };
+      }
+    },
+    fitMap() {
+      fitMap(true);
+    },
+  }));
 
   useEffect(() => {
     const root = svgRef.current;
@@ -83,6 +178,163 @@ export const MapViewer = ({
     });
   }, [legalFingerprint, paintFingerprint, safeMapSvg, selectedId]);
 
+  useEffect(() => {
+    const bounds = normalizeBounds(roomData.mapDefinition?.viewBox);
+    mapBoundsRef.current = bounds;
+    if (svgRef.current) {
+      svgRef.current.style.left = `${bounds.x}px`;
+      svgRef.current.style.top = `${bounds.y}px`;
+      svgRef.current.style.width = `${bounds.width}px`;
+      svgRef.current.style.height = `${bounds.height}px`;
+    }
+    manualRef.current = false;
+    cameraRef.current = null;
+    baseCameraRef.current = null;
+    window.requestAnimationFrame(() => fitMap(false));
+    // fitMap intentionally reads the latest camera refs without changing map identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomData.mapDefinition?.viewBox, safeMapSvg]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+    const resize = () => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      visibleRectRef.current = { x: 0, y: 0, width: rect.width, height: rect.height };
+      if (!cameraRef.current || !manualRef.current) fitMap(false);
+      else renderCamera(cameraRef.current, false);
+    };
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(resize) : null;
+    observer?.observe(container);
+    resize();
+    return () => observer?.disconnect();
+    // Resize callbacks operate on refs so manual cameras survive React renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const result = reduceFocusSnapshot(focusStateRef.current, roomData, localPlayerId);
+    focusStateRef.current = result.state;
+    const effect = result.effect;
+    if (!effect || !cameraRef.current) return;
+    const focusLocalTurn = () => {
+      const owned = roomData.players?.[localPlayerId]?.regionIds || [];
+      const targets = owned.length ? owned : (legalClaims.length ? legalClaims : roomData.mapDefinition?.regionIds || []);
+      focusBounds(regionBounds(targets), { local: true });
+    };
+    if (effect.type === 'local_turn') {
+      focusLocalTurn();
+    } else if (effect.type === 'local_restore') {
+      if (!localRestoreRef.current) return;
+      const base = localRestoreRef.current;
+      localRestoreRef.current = null;
+      animationRef.current = { target: base, kind: 'restore' };
+      renderCamera(base, true);
+      focusTimerRef.current = window.setTimeout(() => { animationRef.current = null; }, reducedMotion() ? 0 : 500);
+    } else if (effect.type === 'remote_action') {
+      const owned = roomData.players?.[effect.actorId]?.regionIds || [];
+      if (effect.actionType === 'save_income' && owned.length === 0) return;
+      let targets = owned;
+      if (effect.actionType === 'claim' && effect.regionId) {
+        const neighbors = roomData.mapDefinition?.regionsById?.[effect.regionId]?.claimNeighbors || [];
+        targets = [effect.regionId, ...neighbors.filter((id) => roomData.claims?.[id]?.ownerId === effect.actorId)];
+      }
+      focusBounds(regionBounds(targets), {
+        restoreAfter: true,
+        onRestored: effect.localTurnStarted ? focusLocalTurn : undefined,
+      });
+    }
+    // Focus helpers intentionally use current room data while event identity controls replays.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    legalFingerprint,
+    localPlayerId,
+    roomData,
+  ]);
+
+  useEffect(() => () => stopTimers(), []);
+
+  const localPoint = (event) => {
+    const rect = containerRef.current.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  };
+
+  const startPointer = (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    cancelAutomationForManualInput();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    pointersRef.current.set(event.pointerId, localPoint(event));
+    significantDrag.current = false;
+    if (pointersRef.current.size === 1) {
+      gestureRef.current = { type: 'pan', point: localPoint(event), camera: { ...cameraRef.current } };
+    } else if (pointersRef.current.size === 2) {
+      const [first, second] = [...pointersRef.current.values()];
+      gestureRef.current = {
+        type: 'pinch',
+        distance: Math.hypot(first.x - second.x, first.y - second.y),
+        camera: { ...cameraRef.current },
+      };
+    }
+    containerRef.current.classList.add('is-dragging');
+  };
+
+  const movePointer = (event) => {
+    if (!pointersRef.current.has(event.pointerId) || !gestureRef.current) return;
+    pointersRef.current.set(event.pointerId, localPoint(event));
+    if (pointersRef.current.size === 1 && gestureRef.current.type === 'pan') {
+      const point = localPoint(event);
+      const delta = { x: point.x - gestureRef.current.point.x, y: point.y - gestureRef.current.point.y };
+      if (Math.hypot(delta.x, delta.y) > 8) significantDrag.current = true;
+      const next = panCamera(gestureRef.current.camera, delta, mapBoundsRef.current, visibleRectRef.current);
+      baseCameraRef.current = next;
+      renderCamera(next, false);
+    } else if (pointersRef.current.size >= 2) {
+      const [first, second] = [...pointersRef.current.values()];
+      const distance = Math.hypot(first.x - second.x, first.y - second.y);
+      const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+      const fitScale = fitBoundsCamera(mapBoundsRef.current, visibleRectRef.current, 0).scale;
+      const nextScale = Math.min(fitScale * 8, Math.max(fitScale * 0.55, gestureRef.current.camera.scale * distance / gestureRef.current.distance));
+      const next = zoomCameraAt(gestureRef.current.camera, nextScale, center, visibleRectRef.current, mapBoundsRef.current);
+      significantDrag.current = true;
+      baseCameraRef.current = next;
+      renderCamera(next, false);
+    }
+  };
+
+  const stopPointer = (event) => {
+    pointersRef.current.delete(event.pointerId);
+    if (pointersRef.current.size === 1) {
+      const point = [...pointersRef.current.values()][0];
+      gestureRef.current = { type: 'pan', point, camera: { ...cameraRef.current } };
+    } else if (pointersRef.current.size === 0) {
+      gestureRef.current = null;
+      containerRef.current?.classList.remove('is-dragging');
+    }
+  };
+
+  const handleWheel = (event) => {
+    event.preventDefault();
+    cancelAutomationForManualInput();
+    const point = localPoint(event);
+    const fitScale = fitBoundsCamera(mapBoundsRef.current, visibleRectRef.current, 0).scale;
+    const nextScale = Math.min(fitScale * 8, Math.max(fitScale * 0.55, cameraRef.current.scale * (event.deltaY > 0 ? 0.9 : 1.1)));
+    const next = zoomCameraAt(cameraRef.current, nextScale, point, visibleRectRef.current, mapBoundsRef.current);
+    baseCameraRef.current = next;
+    renderCamera(next, false);
+  };
+
+  const zoomBy = (factor) => {
+    cancelAutomationForManualInput();
+    const rect = visibleRectRef.current;
+    const point = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    const fitScale = fitBoundsCamera(mapBoundsRef.current, rect, 0).scale;
+    const nextScale = Math.min(fitScale * 8, Math.max(fitScale * 0.55, cameraRef.current.scale * factor));
+    const next = zoomCameraAt(cameraRef.current, nextScale, point, rect, mapBoundsRef.current);
+    baseCameraRef.current = next;
+    renderCamera(next, true);
+  };
+
   const selectRegion = (event) => {
     if (significantDrag.current) return;
     const region = event.target.closest?.('[data-region-id]');
@@ -92,100 +344,36 @@ export const MapViewer = ({
     }
   };
 
-  const startPointer = (x, y) => {
-    setDragging(true);
-    dragRef.current = { x, y, position };
-    significantDrag.current = false;
-  };
-  const movePointer = (x, y) => {
-    if (!dragRef.current) return;
-    const dx = x - dragRef.current.x;
-    const dy = y - dragRef.current.y;
-    if (Math.hypot(dx, dy) > 8) significantDrag.current = true;
-    setPosition(clampPosition({ x: dragRef.current.position.x + dx, y: dragRef.current.position.y + dy }));
-  };
-  const stopPointer = () => {
-    setDragging(false);
-    dragRef.current = null;
-  };
-
-  const handleWheel = (event) => {
-    event.preventDefault();
-    const rectangle = event.currentTarget.getBoundingClientRect();
-    zoomTo(scale * (event.deltaY > 0 ? 0.9 : 1.1), { x: event.clientX - rectangle.left, y: event.clientY - rectangle.top });
-  };
-  const handleTouchStart = (event) => {
-    if (event.touches.length === 1) startPointer(event.touches[0].clientX, event.touches[0].clientY);
-    if (event.touches.length === 2) {
-      stopPointer();
-      touchRef.current = Math.hypot(
-        event.touches[0].clientX - event.touches[1].clientX,
-        event.touches[0].clientY - event.touches[1].clientY,
-      );
-    }
-  };
-  const handleTouchMove = (event) => {
-    if (event.touches.length === 1) movePointer(event.touches[0].clientX, event.touches[0].clientY);
-    if (event.touches.length === 2 && touchRef.current) {
-      const distance = Math.hypot(
-        event.touches[0].clientX - event.touches[1].clientX,
-        event.touches[0].clientY - event.touches[1].clientY,
-      );
-      const rectangle = event.currentTarget.getBoundingClientRect();
-      const center = {
-        x: (event.touches[0].clientX + event.touches[1].clientX) / 2 - rectangle.left,
-        y: (event.touches[0].clientY + event.touches[1].clientY) / 2 - rectangle.top,
-      };
-      significantDrag.current = true;
-      zoomTo(scale * (distance / touchRef.current), center);
-      touchRef.current = distance;
-    }
-  };
-  const handleTouchEnd = (event) => {
-    if (event.touches.length < 2) touchRef.current = null;
-    if (event.touches.length === 0) stopPointer();
-  };
-
   return (
     <main
       ref={containerRef}
-      className={`aop-map-surface aop-map-viewer ${dragging ? 'is-dragging' : ''} ${className}`}
+      className={`aop-map-surface aop-map-viewer ${className}`}
       onClick={selectRegion}
-      onMouseDown={(event) => { if (event.button === 0) startPointer(event.clientX, event.clientY); }}
-      onMouseMove={(event) => movePointer(event.clientX, event.clientY)}
-      onMouseUp={stopPointer}
-      onMouseLeave={stopPointer}
+      onPointerDown={startPointer}
+      onPointerMove={movePointer}
+      onPointerUp={stopPointer}
+      onPointerCancel={stopPointer}
       onWheel={handleWheel}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      onTouchCancel={handleTouchEnd}
     >
-      <div
-        className="aop-map-transform"
-        style={{
-          transform: `translate3d(${position.x}px, ${position.y}px, 0) scale(${scale})`,
-          transition: dragging || touchRef.current ? 'none' : 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-      >
+      <div ref={transformRef} className="aop-map-transform">
         {safeMapSvg && (
           <div ref={svgRef} dangerouslySetInnerHTML={{ __html: safeMapSvg }}/>
         )}
       </div>
 
       {!hideHud && (
-        <div className="aop-map-hud">
+        <div className="aop-map-hud" onPointerDown={(event) => event.stopPropagation()}>
           <span><small>Oda</small><strong>{roomCode}</strong><CopyBtn code={roomCode}/></span>
           <span><small>Round</small><strong>{roomData.roundNumber || 1}</strong></span>
           <span><small>Aktif</small><strong>{currentPlayer?.name || 'Bekleniyor'}</strong></span>
-          <button onClick={leaveRoom} aria-label="Odadan ayrıl"><Icon p={Icons.LogOut}/></button>
+          <button className="aop-map-leave" onClick={leaveRoom} aria-label="Odadan ayrıl"><Icon p={Icons.LogOut}/></button>
         </div>
       )}
-      <div className="aop-map-controls" aria-label="Harita görünümü">
-        <button onClick={() => zoomTo(scale * 1.25)} aria-label="Yakınlaştır"><Icon p={Icons.ZoomIn}/></button>
-        <button onClick={() => zoomTo(scale / 1.25)} aria-label="Uzaklaştır"><Icon p={Icons.ZoomOut}/></button>
-        <button onClick={fitMap} aria-label="Haritayı sığdır"><Icon p={Icons.Fit}/></button>
+      <div className="aop-map-controls" aria-label="Harita görünümü" onPointerDown={(event) => event.stopPropagation()}>
+        <button onClick={() => zoomBy(1.25)} aria-label="Yakınlaştır"><Icon p={Icons.ZoomIn}/></button>
+        <button onClick={() => zoomBy(0.8)} aria-label="Uzaklaştır"><Icon p={Icons.ZoomOut}/></button>
+        <button onClick={() => fitMap(true)} aria-label="Haritayı sığdır"><Icon p={Icons.Fit}/></button>
       </div>
     </main>
   );
-};
+});

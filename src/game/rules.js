@@ -106,3 +106,35 @@ export function applyClaim(room, playerId, regionId) {
     },
   };
 }
+
+export function applySaveIncome(room, playerId) {
+  if (room.phase !== PHASES.CLAIMING) {
+    return { room, eligibility: { legal: false, code: 'PHASE_FROZEN', reason: 'Bu evrede para biriktirilemez.' } };
+  }
+  if (room.turnOrder?.[room.turnIndex] !== playerId) {
+    return { room, eligibility: { legal: false, code: 'NOT_ACTIVE', reason: 'Sıra sende değil.' } };
+  }
+  const player = room.players?.[playerId];
+  if (!player) {
+    return { room, eligibility: { legal: false, code: 'NOT_PLAYER', reason: 'Odanın oyuncusu değilsin.' } };
+  }
+  const income = calculateIncome(room.mapDefinition, room.claims, playerId);
+  const next = advanceTurn(room);
+  return {
+    eligibility: { legal: true, code: 'AVAILABLE', income },
+    room: {
+      ...room,
+      ...next,
+      players: {
+        ...room.players,
+        [playerId]: {
+          ...player,
+          money: safeMoney(player.money) + income,
+          income,
+          // Legacy compatibility only. Atomic turn advancement is the action lock.
+          lastIncomeTurn: room.turnNumber,
+        },
+      },
+    },
+  };
+}

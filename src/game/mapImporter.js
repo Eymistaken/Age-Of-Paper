@@ -250,6 +250,7 @@ export function importSvgMap(svgText) {
       name: record.name,
       price: record.price,
       income: record.income,
+      bounds: record.bounds,
       landNeighbors: [...landGraph.get(record.id)],
       claimNeighbors: [...claimGraph.get(record.id)],
       coastal: record.coastal,

@@ -11,10 +11,9 @@ const serviceMocks = vi.hoisted(() => ({
   acceptJoinRequest: vi.fn().mockResolvedValue(true),
   clearClosedJoinRequest: vi.fn().mockResolvedValue(false),
   claimRegion: vi.fn().mockResolvedValue('claiming'),
-  endTurn: vi.fn().mockResolvedValue(true),
-  ensureTurnIncome: vi.fn().mockResolvedValue(false),
   expireJoinRequest: vi.fn().mockResolvedValue(false),
   rejectJoinRequest: vi.fn().mockResolvedValue(true),
+  saveIncome: vi.fn().mockResolvedValue(5000),
   sendChatMessage: vi.fn().mockResolvedValue(true),
   skipOfflineTurn: vi.fn().mockResolvedValue(true),
   voteJoinRequest: vi.fn().mockResolvedValue(false),
@@ -71,6 +70,8 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   serviceMocks.claimRegion.mockClear();
+  serviceMocks.saveIncome.mockClear();
+  window.localStorage.clear();
   window.matchMedia = vi.fn().mockImplementation((query) => ({
     matches: false,
     media: query,
@@ -158,7 +159,7 @@ describe('local application flow smoke', () => {
     expect(container.textContent).toContain('Bu tarafsız bölge satın alınabilir.');
     const buyButton = [...container.querySelectorAll('button')].find((button) => button.textContent.includes('Satın Al'));
     await act(async () => buyButton.click());
-    expect(serviceMocks.claimRegion).toHaveBeenCalledWith('ABCD', 'p1', 'paper_valley');
+    expect(serviceMocks.claimRegion).toHaveBeenCalledWith('ABCD', 'p1', 'paper_valley', 1);
   });
 
   it('centers accessible chat send controls and shows host join-request actions', async () => {
@@ -228,8 +229,41 @@ describe('local application flow smoke', () => {
     await render(<GameRoom user={{ uid: 'p1' }} roomCode="ABCD" roomData={claimingRoom} leaveRoom={() => {}} resetApp={() => {}}/>);
     expect(container.querySelector('.aop-mobile-game')).not.toBeNull();
     expect(container.textContent).toContain('Hazine');
-    expect(container.textContent).toContain('Gelir');
+    expect(container.textContent).toContain('Biriktirme getirisi');
     expect(container.textContent).toContain('Round');
+  });
+
+  it('offers save-income as the only non-claim turn choice', async () => {
+    await render(<GameRoom user={{ uid: 'p1' }} roomCode="ABCD" roomData={claimingRoom} leaveRoom={() => {}} resetApp={() => {}}/>);
+    const saveButton = [...container.querySelectorAll('button')].find((button) => button.textContent.includes('Para Biriktir'));
+    expect(saveButton.textContent).toContain('+5.000 altın kazan ve sırayı geçir');
+    await act(async () => saveButton.click());
+    expect(serviceMocks.saveIncome).toHaveBeenCalledWith('ABCD', 'p1', 1);
+  });
+
+  it('counts each foreign mobile chat message once and clears when Mesaj becomes visible', async () => {
+    window.matchMedia = vi.fn().mockImplementation((query) => ({
+      matches: query === '(max-width: 1023px)',
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    const initial = { ...claimingRoom, chat: [{ id: 'm1', senderId: 'p2', senderName: 'Bora', text: 'Eski' }] };
+    await render(<GameRoom user={{ uid: 'p1' }} roomCode="ABCD" roomData={initial} leaveRoom={() => {}} resetApp={() => {}}/>);
+    const updated = {
+      ...initial,
+      chat: [
+        ...initial.chat,
+        { id: 'm2', senderId: 'p1', senderName: 'Ada', text: 'Benim' },
+        { id: 'm3', senderId: 'p2', senderName: 'Bora', text: 'Yeni' },
+      ],
+    };
+    await render(<GameRoom user={{ uid: 'p1' }} roomCode="ABCD" roomData={updated} leaveRoom={() => {}} resetApp={() => {}}/>);
+    expect(container.querySelector('.aop-unread-badge')?.textContent).toBe('1');
+    Object.defineProperty(container.querySelector('.aop-mobile-sheet-body'), 'clientHeight', { configurable: true, value: 180 });
+    const chatTab = [...container.querySelectorAll('.aop-mobile-tabs button')].find((button) => button.textContent.includes('Mesaj'));
+    await act(async () => chatTab.click());
+    expect(container.querySelector('.aop-unread-badge')).toBeNull();
   });
 
   it('renders the frozen claim complete result ledger', async () => {

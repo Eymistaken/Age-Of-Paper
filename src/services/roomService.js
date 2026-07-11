@@ -19,9 +19,8 @@ import {
   ROOM_CODE_LENGTH,
   STARTING_MONEY,
 } from '../constants';
-import { grantIncomeForTurn } from '../game/economy';
 import { PHASES } from '../game/phases';
-import { applyClaim, releasePlayerClaims } from '../game/rules';
+import { applyClaim, applySaveIncome, releasePlayerClaims } from '../game/rules';
 import { advanceTurn, getActivePlayerId, removePlayerFromTurnState } from '../game/turns';
 import { validateMapDefinition } from '../game/mapValidation';
 import {
@@ -126,7 +125,7 @@ export async function createRoom(userId, nickname) {
         const snapshot = await transaction.get(reference);
         if (snapshot.exists()) throw new GameActionError('Oda kodu çakıştı.', 'ROOM_COLLISION');
         transaction.set(reference, {
-          schemaVersion: 2,
+          schemaVersion: 3,
           phase: PHASES.LOBBY,
           hostId: userId,
           createdAt: serverTimestamp(),
@@ -400,7 +399,6 @@ export async function startGame(roomCode, userId) {
       regionIds: [],
       lastIncomeTurn: 0,
     }]));
-    players[turnOrder[0]] = grantIncomeForTurn(players[turnOrder[0]], 1);
     transaction.update(reference, {
       phase: PHASES.CLAIMING,
       players,
@@ -414,31 +412,23 @@ export async function startGame(roomCode, userId) {
   });
 }
 
-export async function ensureTurnIncome(roomCode, userId) {
-  return runTransaction(db, async (transaction) => {
-    const reference = roomRef(roomCode);
-    const snapshot = await transaction.get(reference);
-    if (!snapshot.exists()) return false;
-    const room = snapshot.data();
-    if (room.phase !== PHASES.CLAIMING || getActivePlayerId(room) !== userId) return false;
-    const player = room.players?.[userId];
-    const updatedPlayer = grantIncomeForTurn(player, room.turnNumber);
-    if (updatedPlayer === player) return false;
-    transaction.update(reference, {
-      players: { ...room.players, [userId]: updatedPlayer },
-      lastAction: { type: 'income', actorId: userId, turnNumber: room.turnNumber, at: Timestamp.now() },
-    });
-    return true;
-  });
+function assertExpectedTurn(room, expectedTurnNumber) {
+  if (Number.isInteger(expectedTurnNumber) && room.turnNumber !== expectedTurnNumber) {
+    throw new GameActionError('Bu hamlenin turu artık geçmiş.', 'STALE_TURN');
+  }
 }
 
-export async function claimRegion(roomCode, userId, regionId) {
-  await ensureTurnIncome(roomCode, userId);
+function actionId(turnNumber, type, actorId, detail = '') {
+  return [turnNumber, type, actorId, detail].filter(Boolean).join(':');
+}
+
+export async function claimRegion(roomCode, userId, regionId, expectedTurnNumber) {
   return runTransaction(db, async (transaction) => {
     const reference = roomRef(roomCode);
     const snapshot = await transaction.get(reference);
     if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
     const room = snapshot.data();
+    assertExpectedTurn(room, expectedTurnNumber);
     const result = applyClaim(room, userId, regionId);
     if (!result.eligibility.legal) throw new GameActionError(result.eligibility.reason, result.eligibility.code);
     const next = result.room;
@@ -450,29 +440,45 @@ export async function claimRegion(roomCode, userId, regionId) {
       turnIndex: next.turnIndex,
       turnNumber: next.turnNumber,
       roundNumber: next.roundNumber,
-      lastAction: { type: 'claim', actorId: userId, regionId, turnNumber: room.turnNumber, at: Timestamp.now() },
+      lastAction: {
+        type: 'claim',
+        actorId: userId,
+        regionId,
+        turnNumber: room.turnNumber,
+        actionId: actionId(room.turnNumber, 'claim', userId, regionId),
+        at: Timestamp.now(),
+      },
     });
     return next.phase;
   });
 }
 
-export async function endTurn(roomCode, userId) {
-  await ensureTurnIncome(roomCode, userId);
+export async function saveIncome(roomCode, userId, expectedTurnNumber) {
   return runTransaction(db, async (transaction) => {
     const reference = roomRef(roomCode);
     const snapshot = await transaction.get(reference);
     if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
     const room = snapshot.data();
-    if (room.phase !== PHASES.CLAIMING) throw new GameActionError('Bu evrede tur ilerletilemez.', 'PHASE_FROZEN');
-    if (getActivePlayerId(room) !== userId) throw new GameActionError('Sıra sende değil.', 'NOT_ACTIVE');
-    const next = advanceTurn(room);
+    assertExpectedTurn(room, expectedTurnNumber);
+    const result = applySaveIncome(room, userId);
+    if (!result.eligibility.legal) {
+      throw new GameActionError(result.eligibility.reason, result.eligibility.code);
+    }
+    const next = result.room;
     transaction.update(reference, {
+      players: next.players,
       turnIndex: next.turnIndex,
       turnNumber: next.turnNumber,
       roundNumber: next.roundNumber,
-      lastAction: { type: 'end_turn', actorId: userId, turnNumber: room.turnNumber, at: Timestamp.now() },
+      lastAction: {
+        type: 'save_income',
+        actorId: userId,
+        turnNumber: room.turnNumber,
+        actionId: actionId(room.turnNumber, 'save_income', userId),
+        at: Timestamp.now(),
+      },
     });
-    return true;
+    return result.eligibility.income;
   });
 }
 

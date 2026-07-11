@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BASE_INCOME } from '../constants';
 import { PHASES } from './phases';
-import { applyClaim, getClaimEligibility, getLegalClaims, releasePlayerClaims } from './rules';
+import { applyClaim, applySaveIncome, getClaimEligibility, getLegalClaims, releasePlayerClaims } from './rules';
 
 const regions = [
   { id: 'a', name: 'A', price: 4000, income: 500, landNeighbors: ['b'], claimNeighbors: ['b'], coastal: false },
@@ -76,6 +76,36 @@ describe('claim rules', () => {
     expect(result.room.phase).toBe(PHASES.CLAIM_COMPLETE);
     expect(result.room.claims.c.ownerId).toBe('p1');
     expect(result.room.turnNumber).toBe(3);
+    expect(result.room.players.p1.money).toBe(12_000);
+  });
+
+  it('advances after a claim without adding that turn saving yield', () => {
+    const room = {
+      phase: PHASES.CLAIMING,
+      mapDefinition,
+      claims: {},
+      players: { p1: { id: 'p1', money: 10_000, income: BASE_INCOME, regionIds: [] }, p2: { id: 'p2', money: 0, income: BASE_INCOME, regionIds: [] } },
+      turnOrder: ['p1', 'p2'], turnIndex: 0, turnNumber: 1, roundNumber: 1,
+    };
+    const result = applyClaim(room, 'p1', 'a');
+    expect(result.room.players.p1.money).toBe(6000);
+    expect(result.room.turnNumber).toBe(2);
+  });
+
+  it('adds calculated income once and advances without changing claims', () => {
+    const room = {
+      phase: PHASES.CLAIMING,
+      mapDefinition,
+      claims: { a: { ownerId: 'p1', claimedAtTurn: 1 } },
+      players: { p1: { id: 'p1', money: 1000, income: 5500, regionIds: ['a'], lastIncomeTurn: 0 }, p2: { id: 'p2', money: 0, income: BASE_INCOME, regionIds: [] } },
+      turnOrder: ['p1', 'p2'], turnIndex: 0, turnNumber: 3, roundNumber: 2,
+    };
+    const result = applySaveIncome(room, 'p1');
+    expect(result.eligibility.legal).toBe(true);
+    expect(result.room.players.p1.money).toBe(6500);
+    expect(result.room.players.p1.lastIncomeTurn).toBe(3);
+    expect(result.room.claims).toEqual(room.claims);
+    expect(result.room.turnNumber).toBe(4);
   });
 
   it('releases a departing player claims so the graph cannot be blocked', () => {

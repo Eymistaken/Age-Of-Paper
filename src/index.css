@@ -181,8 +181,9 @@
 }
 .aop-map-viewer { position: relative; min-width: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; }
 .aop-map-viewer.is-dragging { cursor: grabbing; }
-.aop-map-transform { position: absolute; inset: 0; width: 100%; height: 100%; transform-origin: 0 0; will-change: transform; }
-.aop-map-transform > div, .aop-map-transform svg { width: 100%; height: 100%; }
+.aop-map-transform { position: absolute; top: 0; left: 0; width: 0; height: 0; transform-origin: 0 0; will-change: transform; }
+.aop-map-transform > div { position: absolute; overflow: visible; }
+.aop-map-transform svg { display: block; width: 100%; height: 100%; }
 .default-land { fill: #b7a370; stroke: var(--aop-ink); stroke-width: 1.2px; opacity: .88; cursor: pointer; vector-effect: non-scaling-stroke; transition: fill 180ms ease-out, opacity 180ms ease-out, stroke-width 180ms ease-out; }
 .default-land:hover { opacity: 1; stroke-width: 2px; }
 .default-land.owned-land { opacity: .96; }
@@ -193,13 +194,14 @@
 .aop-map-hud > span:first-child { flex-direction: row; gap: 8px; }
 .aop-map-hud small, .aop-mobile-hud small { color: var(--aop-muted); font-size: .6rem; font-weight: 700; text-transform: uppercase; }
 .aop-map-hud strong { max-width: 120px; overflow: hidden; color: var(--aop-paper-light); font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
-.aop-map-hud button { min-width: 48px; border: 0; background: transparent; color: var(--aop-danger); }
+.aop-map-hud button { display: grid; min-width: 48px; min-height: 48px; place-items: center; padding: 0; border: 0; background: transparent; color: var(--aop-danger); }
+.aop-map-hud button svg, .aop-mobile-icon-btn svg { display: block; margin: 0; }
 .aop-map-controls { position: absolute; right: 14px; bottom: 14px; z-index: 12; display: grid; grid-template-columns: repeat(3, 46px); overflow: hidden; border: 1px solid var(--aop-bronze); border-radius: var(--aop-radius); background: var(--aop-panel); }
 .aop-map-controls button { display: grid; min-width: 44px; place-items: center; border: 0; border-right: 1px solid var(--aop-line); background: var(--aop-panel-deep); color: var(--aop-gold); }
 .aop-map-controls button:last-child { border-right: 0; }
 
-.aop-mobile-game { position: relative; width: 100%; height: 100dvh; min-height: 100dvh; overflow: hidden; }
-.aop-mobile-map { position: absolute; inset: 0; padding-top: calc(env(safe-area-inset-top) + 64px); }
+.aop-mobile-game { position: relative; width: 100%; height: 100dvh; min-height: 280px; overflow: hidden; }
+.aop-mobile-map { position: absolute; inset: 0; }
 .aop-mobile-hud {
   position: absolute;
   top: 0;
@@ -222,8 +224,8 @@
 .aop-mobile-hud strong { max-width: 100%; overflow: hidden; color: var(--aop-paper-light); font-size: clamp(.58rem, 1.8vw, .78rem); text-overflow: ellipsis; white-space: nowrap; }
 .aop-mobile-room { position: relative; }
 .aop-mobile-room button { position: absolute; top: -14px; right: -3px; transform: scale(.75); }
-.aop-mobile-icon-btn { display: grid; min-width: 44px; min-height: 44px; place-items: center; border: 1px solid var(--aop-line); border-radius: var(--aop-radius); background: var(--aop-panel-deep); color: var(--aop-danger); }
-.aop-mobile-map .aop-map-controls { bottom: calc(min(42dvh, 390px) + env(safe-area-inset-bottom) + 14px); }
+.aop-mobile-icon-btn { display: grid; min-width: 44px; min-height: 44px; place-items: center; padding: 0; border: 1px solid var(--aop-line); border-radius: var(--aop-radius); background: var(--aop-panel-deep); color: var(--aop-danger); }
+.aop-mobile-map .aop-map-controls { bottom: calc(var(--aop-sheet-height, 300px) + 14px); transition: bottom 300ms cubic-bezier(.22,1,.36,1); }
 .aop-mobile-sheet {
   position: absolute;
   right: 0;
@@ -231,33 +233,39 @@
   left: 0;
   z-index: 40;
   display: flex;
-  height: min(42dvh, 390px);
-  min-height: 280px;
+  height: 300px;
+  min-height: 0;
   flex-direction: column;
-  padding: 5px 11px calc(env(safe-area-inset-bottom) + 10px);
+  padding: 0 11px calc(env(safe-area-inset-bottom) + 10px);
   overflow: hidden;
   border-top: 2px solid var(--aop-bronze);
   border-radius: 16px 16px 0 0;
   background: rgba(34,32,25,.99);
   box-shadow: 0 -12px 28px rgba(10,9,6,.46);
-  transition: height 300ms cubic-bezier(.22,1,.36,1);
+  transition: height 340ms cubic-bezier(.22,1,.36,1);
 }
-.aop-mobile-sheet.is-expanded { height: min(78dvh, 720px); }
 .aop-mobile-sheet.is-dragging { transition: none; }
-.aop-mobile-grip { display: flex; min-height: 28px; width: 100%; align-items: center; justify-content: center; border: 0; background: transparent; touch-action: none; }
+.aop-mobile-sheet.is-dragging .aop-mobile-sheet-body { overflow: hidden; touch-action: none; }
+.aop-mobile-grip { display: flex; min-height: 48px; width: 100%; flex: 0 0 48px; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; touch-action: none; }
 .aop-mobile-grip span { width: 54px; height: 5px; border-radius: 99px; background: var(--aop-line); }
 .aop-mobile-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-bottom: 9px; }
-.aop-mobile-tabs button { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--aop-line); border-radius: var(--aop-radius); background: var(--aop-panel-deep); color: var(--aop-muted); font-size: .75rem; font-weight: 700; }
+.aop-mobile-tabs button { position: relative; display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--aop-line); border-radius: var(--aop-radius); background: var(--aop-panel-deep); color: var(--aop-muted); font-size: .75rem; font-weight: 700; }
 .aop-mobile-tabs button.is-active { border-color: var(--aop-gold-deep); background: var(--aop-gold); color: var(--aop-ink); }
+.aop-tab-icon { position: relative; display: inline-grid; flex: 0 0 auto; place-items: center; }
+.aop-unread-badge { position: absolute; top: -10px; left: 10px; display: grid; min-width: 18px; height: 18px; place-items: center; padding: 0 4px; border: 1px solid var(--aop-paper-light); border-radius: 99px; background: var(--aop-danger); color: var(--aop-paper-light); font-size: .59rem; font-variant-numeric: tabular-nums; line-height: 1; box-shadow: 0 2px 5px rgba(10,9,6,.5); }
+.aop-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); clip-path: inset(50%); white-space: nowrap; }
 .aop-mobile-sheet-body { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 1px 2px; }
 .aop-mobile-order-card { display: grid; gap: 10px; padding-bottom: 4px; }
 .aop-mobile-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .aop-mobile-facts > span { display: flex; min-width: 0; flex-direction: column; padding: 8px; border: 1px solid var(--aop-line); border-radius: 3px; background: var(--aop-panel-deep); }
 .aop-mobile-facts strong { overflow: hidden; color: var(--aop-paper-light); font-size: .78rem; text-overflow: ellipsis; }
 .aop-mobile-action { display: flex; width: 100%; min-height: 48px; align-items: center; justify-content: center; padding: 10px 12px; }
+.aop-save-income { flex-direction: column; gap: 2px; }
+.aop-save-income small { font-family: 'Work Sans', sans-serif; font-size: .63rem; font-weight: 600; }
 .aop-mobile-chat { display: flex; min-height: 100%; flex-direction: column; }
 .aop-mobile-chat .aop-chat-messages { min-height: 130px; }
 .aop-mobile-chat .aop-chat-form { position: sticky; bottom: 0; padding-bottom: max(9px, env(safe-area-inset-bottom)); }
+.aop-drawer-dragging, .aop-drawer-dragging body { overflow: hidden; overscroll-behavior: none; }
 
 .aop-map-dropzone { display: grid; min-height: 112px; cursor: pointer; place-items: center; gap: 6px; padding: 16px; border: 1px dashed var(--aop-gold-deep); border-radius: var(--aop-radius); background: color-mix(in srgb, var(--aop-panel) 82%, transparent); color: var(--aop-paper-light); text-align: center; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
 .aop-map-dropzone:hover, .aop-map-dropzone:focus-within, .aop-map-dropzone.is-dragging { border-color: var(--aop-gold); background: color-mix(in srgb, var(--aop-gold) 14%, var(--aop-panel)); outline: 2px solid color-mix(in srgb, var(--aop-gold) 45%, transparent); outline-offset: 2px; }

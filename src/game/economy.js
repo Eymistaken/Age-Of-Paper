@@ -14,14 +14,3 @@ export function calculateIncome(mapDefinition, claims = {}, playerId) {
     return total + (Number.isFinite(income) && income >= 0 ? income : 0);
   }, BASE_INCOME);
 }
-
-export function grantIncomeForTurn(player, turnNumber) {
-  if (!player || !Number.isInteger(turnNumber) || turnNumber < 1) return player;
-  if ((player.lastIncomeTurn || 0) >= turnNumber) return player;
-  const income = Number.isFinite(player.income) && player.income >= 0 ? player.income : BASE_INCOME;
-  return {
-    ...player,
-    money: safeMoney(player.money) + income,
-    lastIncomeTurn: turnNumber,
-  };
-}

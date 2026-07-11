@@ -4,13 +4,18 @@ import { PHASES } from '../game/phases';
 import { isJoinRequestExpired, valueMillis } from '../game/joinRequests';
 import { getClaimEligibility, getLegalClaims } from '../game/rules';
 import {
+  readStoredUnread,
+  unreadStorageKey,
+  updateUnreadState,
+  writeStoredUnread,
+} from '../game/unreadMessages';
+import {
   claimRegion,
   acceptJoinRequest,
   clearClosedJoinRequest,
-  endTurn,
-  ensureTurnIncome,
   expireJoinRequest,
   rejectJoinRequest,
+  saveIncome,
   sendChatMessage,
   skipOfflineTurn,
   voteJoinRequest,
@@ -27,11 +32,17 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
   const [actionError, setActionError] = useState('');
   const [actionPending, setActionPending] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [mobileChatVisible, setMobileChatVisible] = useState(false);
+  const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== 'hidden');
+  const [unreadCount, setUnreadCount] = useState(0);
   const [compactViewport, setCompactViewport] = useState(() => (
     typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches
   ));
   const chatEndRef = useRef(null);
   const expiringRequests = useRef(new Set());
+  const unreadStateRef = useRef(null);
+  const latestChatRef = useRef(roomData.chat || []);
+  latestChatRef.current = roomData.chat || [];
 
   const me = roomData.players?.[user.uid];
   const currentPlayerId = roomData.turnOrder?.[roomData.turnIndex] || null;
@@ -42,9 +53,7 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
   const selectedRegion = selectedId ? regionsById[selectedId] : null;
   const selectedClaim = selectedId ? roomData.claims?.[selectedId] : null;
   const selectedOwner = selectedClaim?.ownerId ? roomData.players?.[selectedClaim.ownerId] : null;
-  const currentIncome = Number.isFinite(me?.income)
-    ? me.income
-    : calculateIncome(roomData.mapDefinition, roomData.claims, user.uid);
+  const currentIncome = calculateIncome(roomData.mapDefinition, roomData.claims, user.uid);
   const lastChatId = roomData.chat?.at(-1)?.id || roomData.chat?.length || 0;
   const pendingJoinRequests = useMemo(() => Object.values(roomData.joinRequests || {})
     .filter((request) => request.status === 'pending' && !isJoinRequestExpired(request, now))
@@ -53,6 +62,8 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
   const legalClaims = useMemo(() => (
     isMyTurn ? getLegalClaims(roomData.mapDefinition, roomData.claims, user.uid) : []
   ), [isMyTurn, roomData.claims, roomData.mapDefinition, user.uid]);
+  const unreadKey = useMemo(() => unreadStorageKey(roomCode, user.uid), [roomCode, user.uid]);
+  const chatVisible = pageVisible && (compactViewport ? mobileChatVisible : true);
 
   const eligibility = useMemo(() => getClaimEligibility({
     phase: roomData.phase,
@@ -79,13 +90,27 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
   }, []);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [lastChatId]);
+    const update = () => setPageVisible(document.visibilityState !== 'hidden');
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
 
   useEffect(() => {
-    if (!isMyTurn || (me?.lastIncomeTurn || 0) >= roomData.turnNumber) return;
-    ensureTurnIncome(roomCode, user.uid).catch((error) => setActionError(error.message));
-  }, [isMyTurn, me?.lastIncomeTurn, roomCode, roomData.turnNumber, user.uid]);
+    unreadStateRef.current = readStoredUnread(window.localStorage, unreadKey, latestChatRef.current);
+    setUnreadCount(unreadStateRef.current.unread);
+  }, [unreadKey]);
+
+  useEffect(() => {
+    if (!unreadStateRef.current) return;
+    const next = updateUnreadState(unreadStateRef.current, roomData.chat || [], user.uid, chatVisible);
+    unreadStateRef.current = next;
+    writeStoredUnread(window.localStorage, unreadKey, next);
+    setUnreadCount(next.unread);
+  }, [chatVisible, roomData.chat, unreadKey, user.uid]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [lastChatId]);
 
   useEffect(() => {
     if (selectedId && !regionsById[selectedId]) setSelectedId(null);
@@ -131,10 +156,10 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
   }, [actionPending]);
 
   const buySelected = () => runAction(
-    () => claimRegion(roomCode, user.uid, selectedId),
+    () => claimRegion(roomCode, user.uid, selectedId, roomData.turnNumber),
     { clearSelection: true },
   );
-  const finishTurn = () => runAction(() => endTurn(roomCode, user.uid));
+  const finishTurn = () => runAction(() => saveIncome(roomCode, user.uid, roomData.turnNumber));
   const skipPlayer = () => runAction(() => skipOfflineTurn(roomCode, user.uid));
   const submitMessage = async (event) => {
     event.preventDefault();
@@ -179,6 +204,7 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     approveRequest,
     rejectRequest,
     resetApp,
+    unreadCount,
   };
 
   if (roomData.phase === PHASES.CLAIM_COMPLETE) {
@@ -192,6 +218,7 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
         setSelectedId={setSelectedId}
         legalClaims={legalClaims}
         leaveRoom={leaveRoom}
+        onChatVisibilityChange={setMobileChatVisible}
       />
     );
   }
@@ -207,6 +234,7 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
         legalClaims={legalClaims}
         currentPlayer={currentPlayer}
         leaveRoom={leaveRoom}
+        localPlayerId={user.uid}
       />
       <RightPanel {...shared} />
     </div>

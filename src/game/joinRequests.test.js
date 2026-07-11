@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { grantIncomeForTurn } from './economy';
 import {
   acceptJoinRequestState,
   castJoinVote,
@@ -67,11 +66,9 @@ describe('in-game join requests', () => {
     expect(isJoinRequestExpired(room().joinRequests.new, 601000)).toBe(true);
   });
 
-  it('grants the late player first-turn income once', () => {
+  it('keeps the late player at zero money until they choose to save', () => {
     const accepted = acceptJoinRequestState(room(), 'new', 'host', 2000);
-    const first = grantIncomeForTurn(accepted.players.new, 10);
-    const duplicate = grantIncomeForTurn(first, 10);
-    expect(first.money).toBe(5000);
-    expect(duplicate).toBe(first);
+    expect(accepted.players.new.money).toBe(0);
+    expect(accepted.players.new.lastIncomeTurn).toBe(0);
   });
 });

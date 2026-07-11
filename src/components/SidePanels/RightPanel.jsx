@@ -26,7 +26,7 @@ export const RightPanel = ({
       <div className="aop-label">Komutan</div>
       <h2 className="aop-title text-2xl">{me.name}</h2>
       <div className="aop-treasury"><Icon p={Icons.Coins} s={18}/>{(me.money || 0).toLocaleString('tr-TR')} altın</div>
-      <div className="aop-income">+{currentIncome.toLocaleString('tr-TR')} tur başı gelir</div>
+      <div className="aop-income">Para biriktirirsen +{currentIncome.toLocaleString('tr-TR')}</div>
     </section>
 
     <section className={`aop-order-sheet ${isMyTurn ? 'is-my-turn' : ''}`}>
@@ -37,7 +37,7 @@ export const RightPanel = ({
           <dl className="aop-region-facts">
             <div><dt>Sahibi</dt><dd>{selectedOwner?.name || 'Tarafsız'}</dd></div>
             <div><dt>Fiyat</dt><dd>{selectedRegion.price.toLocaleString('tr-TR')}</dd></div>
-            <div><dt>Gelir</dt><dd>+{selectedRegion.income.toLocaleString('tr-TR')}</dd></div>
+            <div><dt>Getiri</dt><dd>+{selectedRegion.income.toLocaleString('tr-TR')}</dd></div>
           </dl>
           <p className={`aop-claim-reason ${eligibility.legal ? 'is-legal' : ''}`}>{eligibility.reason}</p>
           <button onClick={buySelected} disabled={!eligibility.legal || actionPending} className="aop-action aop-action-success aop-primary-order">
@@ -49,8 +49,8 @@ export const RightPanel = ({
       )}
       {actionError && <p className="aop-inline-error" role="alert">{actionError}</p>}
       <button onClick={finishTurn} disabled={!isMyTurn || actionPending} className="aop-button aop-end-turn">
-        Turu Bitir
-        <small>Gelir üretmez, sırayı ilerletir</small>
+        Para Biriktir
+        <small>+{currentIncome.toLocaleString('tr-TR')} altın kazan ve sırayı geçir</small>
       </button>
     </section>
     {pendingJoinRequests.length > 0 && (

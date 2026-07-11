@@ -235,13 +235,11 @@ service cloud.firestore {
         ? isHostStart()
         : type == 'leave'
           ? isLeave()
-          : type == 'income'
-            ? isIncomeGrant()
-            : type == 'claim'
-              ? isClaim()
-              : type == 'end_turn'
-                ? isEndTurn()
-                : type == 'skip_offline' && isOfflineSkip();
+          : type == 'claim'
+            ? isClaim()
+            : type == 'save_income'
+              ? isSaveIncome()
+              : type == 'skip_offline' && isOfflineSkip();
     }
 
     function isValidRoomUpdate() {
@@ -309,6 +307,7 @@ service cloud.firestore {
         && request.resource.data.turnIndex == 0
         && request.resource.data.turnNumber == 1
         && request.resource.data.roundNumber == 1
+        && request.resource.data.players == resource.data.players
         && validAction('start');
     }
 
@@ -333,20 +332,6 @@ service cloud.firestore {
         && validAction('leave');
     }
 
-    function isIncomeGrant() {
-      let oldPlayer = resource.data.players[request.auth.uid];
-      let newPlayer = request.resource.data.players[request.auth.uid];
-      return resource.data.phase == 'claiming'
-        && activePlayerId() == request.auth.uid
-        && roomChangesOnly(['players', 'lastAction'])
-        && request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([request.auth.uid])
-        && newPlayer.diff(oldPlayer).affectedKeys().hasOnly(['money', 'lastIncomeTurn'])
-        && oldPlayer.lastIncomeTurn < resource.data.turnNumber
-        && newPlayer.lastIncomeTurn == resource.data.turnNumber
-        && newPlayer.money == oldPlayer.money + oldPlayer.income
-        && validAction('income');
-    }
-
     function isClaim() {
       let regionId = request.resource.data.lastAction.regionId;
       let region = resource.data.mapDefinition.regionsById[regionId];
@@ -356,6 +341,9 @@ service cloud.firestore {
       return resource.data.phase == 'claiming'
         && activePlayerId() == request.auth.uid
         && validAction('claim')
+        && request.resource.data.lastAction.turnNumber == resource.data.turnNumber
+        && request.resource.data.lastAction.actionId is string
+        && request.resource.data.lastAction.actionId.size() > 0
         && regionId in resource.data.mapDefinition.regionsById
         && !(regionId in resource.data.claims)
         && request.resource.data.claims.diff(resource.data.claims).affectedKeys().hasOnly([regionId])
@@ -381,12 +369,22 @@ service cloud.firestore {
           : request.resource.data.phase == 'claiming' && validTurnAdvance());
     }
 
-    function isEndTurn() {
+    function isSaveIncome() {
+      let oldPlayer = resource.data.players[request.auth.uid];
+      let newPlayer = request.resource.data.players[request.auth.uid];
       return resource.data.phase == 'claiming'
         && activePlayerId() == request.auth.uid
         && request.resource.data.phase == 'claiming'
-        && roomChangesOnly(['turnIndex', 'turnNumber', 'roundNumber', 'lastAction'])
-        && validAction('end_turn')
+        && validAction('save_income')
+        && request.resource.data.lastAction.turnNumber == resource.data.turnNumber
+        && request.resource.data.lastAction.actionId is string
+        && request.resource.data.lastAction.actionId.size() > 0
+        && roomChangesOnly(['players', 'turnIndex', 'turnNumber', 'roundNumber', 'lastAction'])
+        && request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([request.auth.uid])
+        && newPlayer.diff(oldPlayer).affectedKeys().hasOnly(['money', 'lastIncomeTurn'])
+        && oldPlayer.lastIncomeTurn < resource.data.turnNumber
+        && newPlayer.lastIncomeTurn == resource.data.turnNumber
+        && newPlayer.money == oldPlayer.money + oldPlayer.income
         && validTurnAdvance();
     }
 
@@ -436,7 +434,7 @@ service cloud.firestore {
           'players', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber', 'claims', 'chat', 'lastAction',
           'joinRequests', 'joinRequestAction'
         ])
-        && request.resource.data.schemaVersion == 2
+        && request.resource.data.schemaVersion == 3
         && request.resource.data.phase == 'lobby'
         && request.resource.data.hostId == request.auth.uid
         && request.resource.data.createdAt == request.time
