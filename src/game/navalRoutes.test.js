@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { setNavalRoute, setRegionCoastal } from './navalRoutes';
+import {
+  applyNavalMapEdit,
+  createNavalRoute,
+  removeNavalRoute,
+  setNavalRoute,
+  setRegionCoastal,
+} from './navalRoutes';
 import { validateMapDefinition } from './mapValidation';
 
 function map() {
@@ -26,6 +32,28 @@ describe('naval route editing and validation', () => {
     const removed = setNavalRoute(added.mapDefinition, 'a', 'b', false);
     expect(removed.mapDefinition.regionsById.a.seaNeighbors).toEqual([]);
     expect(removed.mapDefinition.regionsById.b.seaNeighbors).toEqual([]);
+  });
+
+  it('atomically marks both endpoints coastal and creates the symmetric route', () => {
+    const result = applyNavalMapEdit(map(), { type: 'create_route', firstId: 'a', secondId: 'b' });
+    expect(result).toMatchObject({ ok: true, autoMarkedCoastal: true, autoMarkedRegionIds: ['a', 'b'] });
+    expect(result.mapDefinition.regionsById.a).toMatchObject({ coastal: true, seaNeighbors: ['b'] });
+    expect(result.mapDefinition.regionsById.b).toMatchObject({ coastal: true, seaNeighbors: ['a'] });
+  });
+
+  it('rejects duplicate and self-routes without changing the map', () => {
+    const routed = createNavalRoute(map(), 'a', 'b').mapDefinition;
+    expect(createNavalRoute(routed, 'a', 'b')).toMatchObject({ ok: false, code: 'DUPLICATE_ROUTE' });
+    expect(createNavalRoute(map(), 'a', 'a')).toMatchObject({ ok: false, code: 'INVALID_ROUTE' });
+  });
+
+  it('removes only the requested symmetric route and rejects a missing route', () => {
+    const routed = createNavalRoute(createNavalRoute(map(), 'a', 'b').mapDefinition, 'a', 'c').mapDefinition;
+    const removed = removeNavalRoute(routed, 'a', 'b');
+    expect(removed.mapDefinition.regionsById.a.seaNeighbors).toEqual(['c']);
+    expect(removed.mapDefinition.regionsById.b.seaNeighbors).toEqual([]);
+    expect(removed.mapDefinition.regionsById.c.seaNeighbors).toEqual(['a']);
+    expect(removeNavalRoute(removed.mapDefinition, 'a', 'b')).toMatchObject({ ok: false, code: 'ROUTE_NOT_FOUND' });
   });
 
   it('does not unmark a routed coast unless routes are removed in the same action', () => {

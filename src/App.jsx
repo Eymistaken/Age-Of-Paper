@@ -312,14 +312,14 @@ function App() {
   };
 
   const editNavalMap = async (edit) => {
-    if (!user) return null;
+    if (!user) return { ok: false, reason: 'Oturum bulunamadı.' };
     setLoading(true);
     setError('');
     try {
       return await configureNavalMap(roomCode, user.uid, edit);
     } catch (editError) {
       setError(editError.message);
-      return null;
+      return { ok: false, code: editError.code, reason: editError.message };
     } finally {
       setLoading(false);
     }

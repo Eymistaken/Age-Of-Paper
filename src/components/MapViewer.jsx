@@ -65,6 +65,7 @@ export const MapViewer = forwardRef(function MapViewer({
   highlightTargetIds = [],
   showNavalRoutes = false,
   navalConfigActive = false,
+  previewNavalRoute = null,
 }, forwardedRef) {
   const containerRef = useRef(null);
   const transformRef = useRef(null);
@@ -555,6 +556,12 @@ export const MapViewer = forwardRef(function MapViewer({
               if (!first || !second) return null;
               return <line key={`${firstId}:${secondId}`} className="aop-sea-route" x1={first.x + first.width / 2} y1={first.y + first.height / 2} x2={second.x + second.width / 2} y2={second.y + second.height / 2}/>;
             })}
+            {showNavalRoutes && previewNavalRoute?.length === 2 && (() => {
+              const first = roomData.mapDefinition?.regionsById?.[previewNavalRoute[0]]?.bounds;
+              const second = roomData.mapDefinition?.regionsById?.[previewNavalRoute[1]]?.bounds;
+              if (!first || !second) return null;
+              return <line className="aop-sea-route-preview" x1={first.x + first.width / 2} y1={first.y + first.height / 2} x2={second.x + second.width / 2} y2={second.y + second.height / 2}/>;
+            })()}
             {militaryVisible && (roomData.mapDefinition?.regionIds || []).map((id) => {
               const bounds = roomData.mapDefinition?.regionsById?.[id]?.bounds;
               const claim = roomData.claims?.[id];

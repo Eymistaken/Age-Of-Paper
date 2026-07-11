@@ -23,7 +23,7 @@ import { PHASES } from '../game/phases';
 import { applyClaim, applySaveIncome, releasePlayerClaims } from '../game/rules';
 import { advanceTurn, getActivePlayerId, removePlayerFromTurnState } from '../game/turns';
 import { validateMapDefinition } from '../game/mapValidation';
-import { setNavalRoute, setRegionCoastal } from '../game/navalRoutes';
+import { applyNavalMapEdit } from '../game/navalRoutes';
 import {
   applyBuildPort,
   applyBuyShips,
@@ -423,9 +423,7 @@ export async function configureNavalMap(roomCode, userId, edit) {
     if (room.hostId !== userId) throw new GameActionError('Deniz rotalarını yalnızca kurucu düzenleyebilir.', 'HOST_ONLY');
     if (room.phase !== PHASES.LOBBY) throw new GameActionError('Oyun başladıktan sonra deniz rotaları değiştirilemez.', 'ROOM_STARTED');
     if (!room.mapDefinition) throw new GameActionError('Önce geçerli bir harita yükle.', 'INVALID_MAP');
-    const result = edit.type === 'coastal'
-      ? setRegionCoastal(room.mapDefinition, edit.regionId, edit.coastal, { removeRoutes: edit.removeRoutes === true })
-      : setNavalRoute(room.mapDefinition, edit.firstId, edit.secondId, edit.connected !== false);
+    const result = applyNavalMapEdit(room.mapDefinition, edit);
     if (!result.ok) throw new GameActionError(result.reason, result.code);
     const validation = validateMapDefinition(result.mapDefinition);
     transaction.update(reference, {
@@ -438,7 +436,7 @@ export async function configureNavalMap(roomCode, userId, edit) {
         regionId: edit.regionId || null,
         firstId: edit.firstId || null,
         secondId: edit.secondId || null,
-        connected: edit.connected !== false,
+        connected: edit.type === 'create_route' || (edit.type === 'route' && edit.connected !== false),
         actionId: `naval_config:${userId}:${Date.now()}`,
         at: Timestamp.now(),
       },

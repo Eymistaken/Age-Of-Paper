@@ -41,6 +41,8 @@ Preserve the established regression contracts unless the task explicitly changes
 
 Treat room schema version 4 as mandatory for combat mutations. The campaign phase order is `lobby` → `claiming` → `claim_complete` → `mobilization` → `war` → `finished`; the final claim freezes without advancing, and mobilization starts with the next active player. Keep naval topology map-driven with normalized `coastal` and symmetric `seaNeighbors` values. Never add geography-specific IDs or built-in routes.
 
+The lobby owns page scrolling with a `100dvh` constrained container while global body scrolling remains disabled. Naval configuration belongs in a portal dialog, never at the bottom of lobby flow. Preserve exact overflow restoration, modal focus trapping/restoration, a single scrollable controls area, mobile full-screen sizing, and the atomic `create_route` contract that marks both endpoints coastal and adds both `seaNeighbors` edges in one transaction.
+
 Grant mobilization/war income exactly once per `turnNumber` with `lastIncomeTurn`, inside every legal logistics/operation transaction as well as any optional feedback transaction. Logistics never advances the turn. Ready, transfer, attack, explicit war end, and offline skip advance once; skipped players receive no income. Use 1,000-soldier increments, persistent ship capacity, and deterministic subtraction combat only.
 
 Captures must atomically update claim ownership, both players' region lists and incomes, preserved ports, destroyed target ships, elimination, turn order, and possible victory. Surrender neutralizes soldiers and ships but preserves ports. Finished rooms freeze economy and military actions while keeping results and chat readable.

@@ -33,7 +33,7 @@ let root;
 let setSelectedId;
 let mapRef;
 
-async function renderMap() {
+async function renderMap(options = {}) {
   await act(async () => {
     root.render(
       <MapViewer
@@ -45,6 +45,7 @@ async function renderMap() {
         legalClaims={['a']}
         localPlayerId="me"
         leaveRoom={() => {}}
+        {...options}
       />,
     );
   });
@@ -150,6 +151,17 @@ describe('MapViewer pointer interactions', () => {
       map.dispatchEvent(pointerEvent('pointerdown', { pointerId: 2, pointerType: 'touch', clientX: 140 }));
       map.dispatchEvent(pointerEvent('pointerup', { pointerId: 2, pointerType: 'touch', clientX: 140 }));
       map.dispatchEvent(pointerEvent('pointerup', { pointerType: 'touch' }));
+    });
+    expect(setSelectedId).not.toHaveBeenCalled();
+  });
+
+  it('does not create a naval endpoint selection when route-editor panning crosses the threshold', async () => {
+    const map = await renderMap({ navalConfigActive: true, showNavalRoutes: true });
+    const mapRegion = container.querySelector('[data-region-id="a"]');
+    await act(async () => {
+      mapRegion.dispatchEvent(pointerEvent('pointerdown', { pointerType: 'touch' }));
+      map.dispatchEvent(pointerEvent('pointermove', { pointerType: 'touch', clientX: 118, clientY: 106 }));
+      map.dispatchEvent(pointerEvent('pointerup', { pointerType: 'touch', clientX: 118, clientY: 106 }));
     });
     expect(setSelectedId).not.toHaveBeenCalled();
   });

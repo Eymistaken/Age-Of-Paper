@@ -56,7 +56,7 @@ export function setRegionCoastal(mapDefinition, regionId, coastal, { removeRoute
   return { ok: true, mapDefinition: map, removedRouteCount: current.seaNeighbors.length };
 }
 
-export function setNavalRoute(mapDefinition, firstId, secondId, connected) {
+function validateRouteEndpoints(mapDefinition, firstId, secondId) {
   if (!firstId || !secondId || firstId === secondId) {
     return { ok: false, code: 'INVALID_ROUTE', reason: 'Rota için iki farklı bölge seç.' };
   }
@@ -64,20 +64,77 @@ export function setNavalRoute(mapDefinition, firstId, secondId, connected) {
   if (!normalized.regionsById[firstId] || !normalized.regionsById[secondId]) {
     return { ok: false, code: 'UNKNOWN_REGION', reason: 'Rota bölgesi haritada bulunmuyor.' };
   }
+  return { ok: true, normalized };
+}
+
+export function createNavalRoute(mapDefinition, firstId, secondId) {
+  const endpoints = validateRouteEndpoints(mapDefinition, firstId, secondId);
+  if (!endpoints.ok) return endpoints;
+  const { normalized } = endpoints;
+  const alreadyConnected = normalized.regionsById[firstId].seaNeighbors.includes(secondId)
+    || normalized.regionsById[secondId].seaNeighbors.includes(firstId);
+  if (alreadyConnected) {
+    return { ok: false, code: 'DUPLICATE_ROUTE', reason: 'Bu iki bölge arasında zaten bir deniz rotası var.' };
+  }
+  const autoMarkedRegionIds = [firstId, secondId]
+    .filter((regionId) => !normalized.regionsById[regionId].coastal);
   const regions = normalized.regions.map((region) => {
     if (region.id !== firstId && region.id !== secondId) return region;
     const otherId = region.id === firstId ? secondId : firstId;
     return {
       ...region,
-      coastal: connected ? true : region.coastal,
-      seaNeighbors: connected
-        ? uniqueSorted([...region.seaNeighbors, otherId])
-        : region.seaNeighbors.filter((id) => id !== otherId),
+      coastal: true,
+      seaNeighbors: uniqueSorted([...region.seaNeighbors, otherId]),
     };
   });
   return {
     ok: true,
     mapDefinition: { ...normalized, regions, regionsById: Object.fromEntries(regions.map((region) => [region.id, region])) },
-    autoMarkedCoastal: connected && (!normalized.regionsById[firstId].coastal || !normalized.regionsById[secondId].coastal),
+    autoMarkedCoastal: autoMarkedRegionIds.length > 0,
+    autoMarkedRegionIds,
   };
+}
+
+export function removeNavalRoute(mapDefinition, firstId, secondId) {
+  const endpoints = validateRouteEndpoints(mapDefinition, firstId, secondId);
+  if (!endpoints.ok) return endpoints;
+  const { normalized } = endpoints;
+  const connected = normalized.regionsById[firstId].seaNeighbors.includes(secondId)
+    && normalized.regionsById[secondId].seaNeighbors.includes(firstId);
+  if (!connected) {
+    return { ok: false, code: 'ROUTE_NOT_FOUND', reason: 'Kaldırılacak deniz rotası bulunamadı.' };
+  }
+  const regions = normalized.regions.map((region) => {
+    if (region.id !== firstId && region.id !== secondId) return region;
+    const otherId = region.id === firstId ? secondId : firstId;
+    return { ...region, seaNeighbors: region.seaNeighbors.filter((id) => id !== otherId) };
+  });
+  return {
+    ok: true,
+    mapDefinition: { ...normalized, regions, regionsById: Object.fromEntries(regions.map((region) => [region.id, region])) },
+  };
+}
+
+export function setNavalRoute(mapDefinition, firstId, secondId, connected) {
+  return connected
+    ? createNavalRoute(mapDefinition, firstId, secondId)
+    : removeNavalRoute(mapDefinition, firstId, secondId);
+}
+
+export function applyNavalMapEdit(mapDefinition, edit) {
+  if (edit?.type === 'coastal') {
+    return setRegionCoastal(mapDefinition, edit.regionId, edit.coastal, {
+      removeRoutes: edit.removeRoutes === true,
+    });
+  }
+  if (edit?.type === 'create_route') {
+    return createNavalRoute(mapDefinition, edit.firstId, edit.secondId);
+  }
+  if (edit?.type === 'remove_route') {
+    return removeNavalRoute(mapDefinition, edit.firstId, edit.secondId);
+  }
+  if (edit?.type === 'route') {
+    return setNavalRoute(mapDefinition, edit.firstId, edit.secondId, edit.connected !== false);
+  }
+  return { ok: false, code: 'INVALID_NAVAL_EDIT', reason: 'Deniz altyapısı işlemi tanınmıyor.' };
 }

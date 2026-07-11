@@ -107,7 +107,9 @@ Importer, ekrana vermeden önce `script`, `foreignObject`, `iframe`, `object`, `
 
 Tek yönlü claim bağlantıları ve legacy geometri çıkarımı anlaşılır uyarı üretir. Deniz rotalarında bilinmeyen kimlik, kendi kendine rota, tekrar, tek yönlülük ve kıyı olmayan uç hata sayılır. Kıyı bölgeleri olup rota bulunmaması yalnızca uyarıdır; kara oyunu başlatılabilir.
 
-Kurucu geçerli harita yüklendikten sonra lobideki görsel deniz editörünü kullanabilir. Bir bölgeyi kıyı olarak işaretleyebilir, iki dinamik bölge arasında çift yönlü rota kurabilir, rotayı kaldırabilir ve rota kullanan bir kıyı işaretini rotaları aynı atomik işlemde kaldırarak kapatabilir. Düzenleme sırasında rotalar bölge merkezleri arasında kesik mavi-yeşil çizgilerle gösterilir. Bu değişiklikler yalnızca lobide ve kurucu transaction'ıyla yapılır.
+Geçerli harita yüklendiğinde lobide kıyı ve çift yönlü rota sayısı özetlenir. Kurucu “Deniz Bağlantılarını Ayarla” ile viewport'a bağlı modal editörü açar; diğer oyuncular aynı diyaloğu salt okunur görebilir. Masaüstünde harita ile tek kaydırılan kontrol sütunu yan yanadır; telefonda tam ekran diyalog, yüksekliği sınırlı harita ve tek kaydırılan alt kontrol alanı kullanır. Lobby'nin kendisi `100dvh` yüksekliğinde tek sayfa kaydırma sahibidir.
+
+Yeni rota akışı başlangıç, varış ve onay adımlarını açıkça gösterir. Onay, iki dinamik ucu gerektiğinde kıyı işaretleyip simetrik rotayı aynı transaction içinde kurar; ayrı ve yarım kalabilecek iki yazma yapılmaz. Kurucu ayrıca bir bölgeyi yalnızca liman kurulabilir kıyı olarak işaretleyebilir, rotayı kaldırabilir ve rota kullanan bir kıyı işaretini açık onayla bütün bağlı rotalarla birlikte atomik olarak kapatabilir. Düzenleme sırasında mevcut ve önerilen rotalar root SVG `viewBox` koordinatlarında kesik mavi-yeşil çizgilerle gösterilir. Bütün mutasyonlar yalnızca lobide ve kurucu transaction'ıyla yapılır.
 
 ## Seferberlik, ekonomi ve lojistik
 
@@ -163,7 +165,7 @@ SVG yükleme alanı aynı sanitization, pricing ve validation hattını kullanan
 
 Yine de oyun tamamen istemci tabanlıdır. Firestore Rules döngü veya keyfi graph traversal yapamadığı için çok adımlı dost kara yolunun her ara kenarını ve host'un bütün dinamik harita tanımını sunucu gibi yeniden hesaplayamaz. Transaction katmanı saf kuralları uygular, rules yerel olarak ispatlanabilen mutation aritmetiğini sınırlar; güçlü rekabetçi hile koruması için bu graph ve harita doğrulaması Cloud Function veya başka güvenilir sunucu koduna taşınmalıdır. App Check ve kalıcı kimlik doğrulama ayrıca değerlendirilmelidir. Firebase web yapılandırma anahtarı sunucu parolası değildir.
 
-Bu depodaki `firestore.rules` yalnızca kaynak dosyadır. Bu özellik kuralları veya hosting'i deploy etmez.
+Firebase Hosting bu depoda yapılandırılmış değildir. Arayüz yayınını mevcut site iş akışı yürütür; Firestore Rules yalnızca aşağıdaki açık hedefli komutla ayrıca deploy edilir.
 
 Kuralları yerel Firestore emulator ile sınamak için:
 

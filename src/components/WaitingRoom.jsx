@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { MAX_PLAYERS } from '../constants';
+import { listNavalRoutes } from '../game/navalRoutes';
 import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
 import { NavalRouteEditor } from './NavalRouteEditor';
@@ -44,6 +45,19 @@ function ValidationSummary({ validation }) {
   );
 }
 
+function NavalInfrastructureSummary({ roomData }) {
+  const regions = Object.values(roomData.mapDefinition?.regionsById || {});
+  const coastalCount = regions.filter((region) => region.coastal).length;
+  const routeCount = listNavalRoutes(roomData.mapDefinition).length;
+  return (
+    <div className="aop-naval-summary" aria-label="Deniz altyapısı özeti">
+      <div className="aop-label">Deniz Altyapısı</div>
+      <strong>{coastalCount} kıyı bölgesi · {routeCount} çift yönlü rota</strong>
+      {!routeCount && <p>Deniz rotası yok — oyun yalnızca kara harekâtıyla devam edebilir.</p>}
+    </div>
+  );
+}
+
 export const WaitingRoom = ({
   roomCode,
   players,
@@ -59,8 +73,11 @@ export const WaitingRoom = ({
   error,
 }) => {
   const [dragActive, setDragActive] = useState(false);
+  const [navalOpen, setNavalOpen] = useState(false);
   const dragDepth = useRef(0);
   const fileInput = useRef(null);
+  const navalButton = useRef(null);
+  const hasValidMap = Boolean(roomData.mapValidation?.valid && roomData.mapSvg && roomData.mapDefinition);
   const preventFileNavigation = (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -90,7 +107,8 @@ export const WaitingRoom = ({
   };
 
   return (
-  <div className="min-h-screen aop-desk text-[var(--aop-text)] overflow-y-auto">
+  <div className={`aop-lobby-shell aop-desk text-[var(--aop-text)] ${navalOpen ? 'is-dialog-open' : ''}`} data-testid="lobby-scroll-owner">
+    <div className="aop-lobby-content" inert={navalOpen ? '' : undefined} aria-hidden={navalOpen || undefined}>
     <header className="aop-lobby-header">
       <div className="flex items-center gap-3">
         <Icon p={Icons.Map} c="text-[var(--aop-gold)]" />
@@ -181,6 +199,20 @@ export const WaitingRoom = ({
                 {roomData.mapSvg && !loading && <small>Yüklü haritayı değiştirir</small>}
                 <input ref={fileInput} type="file" accept=".svg,image/svg+xml" onChange={handleMapUpload} className="sr-only" disabled={loading}/>
               </label>
+              {hasValidMap && (
+                <>
+                  <NavalInfrastructureSummary roomData={roomData} />
+                  <button
+                    ref={navalButton}
+                    type="button"
+                    className="w-full aop-button-secondary min-h-12 px-3"
+                    disabled={loading}
+                    onClick={() => setNavalOpen(true)}
+                  >
+                    Deniz Bağlantılarını Ayarla
+                  </button>
+                </>
+              )}
               <button
                 onClick={startGame}
                 disabled={loading || !roomData.mapValidation?.valid}
@@ -190,17 +222,39 @@ export const WaitingRoom = ({
               </button>
             </section>
           ) : (
-            <section className="aop-panel p-5 text-center">
+            <section className="aop-panel p-5 text-center space-y-3">
               <div className="aop-label mb-2">Bekleme Emri</div>
               <p className="text-[var(--aop-muted)]">Kurucu geçerli haritayı yükleyip oyunu başlatınca masa açılacak.</p>
+              {hasValidMap && (
+                <>
+                  <NavalInfrastructureSummary roomData={roomData} />
+                  <button
+                    ref={navalButton}
+                    type="button"
+                    className="w-full aop-button-secondary min-h-12 px-3"
+                    onClick={() => setNavalOpen(true)}
+                  >
+                    Deniz Bağlantılarını Gör
+                  </button>
+                </>
+              )}
             </section>
           )}
         </aside>
       </div>
-      {isHost && roomData.mapValidation?.valid && roomData.mapSvg && (
-        <NavalRouteEditor roomData={roomData} roomCode={roomCode} onEdit={editNavalMap} loading={loading} />
-      )}
     </main>
+    </div>
+    {navalOpen && hasValidMap && (
+      <NavalRouteEditor
+        roomData={roomData}
+        roomCode={roomCode}
+        onEdit={editNavalMap}
+        onClose={() => setNavalOpen(false)}
+        returnFocusRef={navalButton}
+        isHost={isHost}
+        loading={loading}
+      />
+    )}
   </div>
   );
 };

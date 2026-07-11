@@ -526,6 +526,59 @@ describe('single-choice turn economy security rules', () => {
   });
 });
 
+describe('lobby naval configuration security rules', () => {
+  function navalLobby() {
+    const base = roomData(['host', 'a'], {
+      phase: 'lobby', turnOrder: [], turnIndex: 0, turnNumber: 0, roundNumber: 0, claims: {},
+    });
+    return {
+      ...base,
+      mapDefinition: {
+        ...base.mapDefinition,
+        regionsById: {
+          r1: { ...base.mapDefinition.regionsById.r1, coastal: false, seaNeighbors: [] },
+          r2: { ...base.mapDefinition.regionsById.r2, coastal: false, seaNeighbors: [] },
+        },
+      },
+    };
+  }
+
+  function combinedRouteUpdate(room, actorId = 'host') {
+    return {
+      mapDefinition: {
+        ...room.mapDefinition,
+        regionsById: {
+          r1: { ...room.mapDefinition.regionsById.r1, coastal: true, seaNeighbors: ['r2'] },
+          r2: { ...room.mapDefinition.regionsById.r2, coastal: true, seaNeighbors: ['r1'] },
+        },
+      },
+      mapValidation: { valid: true },
+      lastAction: {
+        type: 'naval_config', actorId, editType: 'create_route', firstId: 'r1', secondId: 'r2',
+        regionId: null, connected: true, actionId: `naval:${actorId}`, at: Timestamp.now(),
+      },
+    };
+  }
+
+  it('allows the host to save both coastal endpoints and their symmetric route in one write', async () => {
+    const room = navalLobby();
+    await seed('NAVAL_HOST', room);
+    await assertSucceeds(updateDoc(doc(context('host'), 'rooms', 'NAVAL_HOST'), combinedRouteUpdate(room)));
+    const stored = (await getDoc(doc(context('host'), 'rooms', 'NAVAL_HOST'))).data();
+    expect(stored.mapDefinition.regionsById.r1).toMatchObject({ coastal: true, seaNeighbors: ['r2'] });
+    expect(stored.mapDefinition.regionsById.r2).toMatchObject({ coastal: true, seaNeighbors: ['r1'] });
+  });
+
+  it('rejects the same mutation from a non-host or after the lobby', async () => {
+    const room = navalLobby();
+    await seed('NAVAL_MEMBER', room);
+    await assertFails(updateDoc(doc(context('a'), 'rooms', 'NAVAL_MEMBER'), combinedRouteUpdate(room, 'a')));
+    const started = { ...room, phase: 'claiming', turnOrder: ['host', 'a'], turnIndex: 0, turnNumber: 1, roundNumber: 1 };
+    await seed('NAVAL_STARTED', started);
+    await assertFails(updateDoc(doc(context('host'), 'rooms', 'NAVAL_STARTED'), combinedRouteUpdate(started)));
+  });
+});
+
 describe('mobilization and war security rules', () => {
   it('allows exact recruiting without advancing and rejects wrong cost or enemy recruiting', async () => {
     const room = warRoom();
