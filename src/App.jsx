@@ -10,6 +10,7 @@ import { WaitingRoom } from './components/WaitingRoom';
 import { importSvgMap } from './game/mapImporter';
 import { readSvgFile } from './game/svgUpload';
 import { PHASES, resolvePhase } from './game/phases';
+import { normalizeNavalRegions } from './game/navalRoutes';
 import {
   createRoom as createRoomTransaction,
   cancelJoinRequest,
@@ -17,6 +18,7 @@ import {
   joinRoom as joinRoomTransaction,
   leaveRoom as leaveRoomTransaction,
   setRoomMap,
+  configureNavalMap,
   startGame as startGameTransaction,
   updatePresence,
 } from './services/roomService';
@@ -28,7 +30,30 @@ function normalizeLegacyRoom(room) {
       .filter(([, value]) => value?.owner)
       .map(([regionId, value]) => [regionId, { ownerId: value.owner }]),
   );
-  return { ...room, phase, claims, joinRequests: room.joinRequests || {} };
+  const mapDefinition = room.mapDefinition ? normalizeNavalRegions(room.mapDefinition) : null;
+  const players = Object.fromEntries(Object.entries(room.players || {}).map(([id, player]) => [id, {
+    ...player,
+    eliminated: player.eliminated === true,
+  }]));
+  const safeClaims = Object.fromEntries(Object.entries(claims).map(([id, claim]) => [id, {
+    ...claim,
+    ...([PHASES.MOBILIZATION, PHASES.WAR, PHASES.FINISHED].includes(phase) ? {
+      soldiers: Number.isSafeInteger(claim.soldiers) && claim.soldiers >= 0 ? claim.soldiers : 0,
+      hasPort: claim.hasPort === true,
+      ships: Number.isSafeInteger(claim.ships) && claim.ships >= 0 ? claim.ships : 0,
+    } : {}),
+  }]));
+  return {
+    ...room,
+    phase,
+    players,
+    claims: safeClaims,
+    mapDefinition,
+    joinRequests: room.joinRequests || {},
+    mobilizationPending: room.mobilizationPending || [],
+    mobilizationTurnsRemaining: room.mobilizationTurnsRemaining || 0,
+    winnerId: room.winnerId || null,
+  };
 }
 
 function storedPendingRequest() {
@@ -286,6 +311,20 @@ function App() {
     }
   };
 
+  const editNavalMap = async (edit) => {
+    if (!user) return null;
+    setLoading(true);
+    setError('');
+    try {
+      return await configureNavalMap(roomCode, user.uid, edit);
+    } catch (editError) {
+      setError(editError.message);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!user) {
     return (
       <div className="h-screen flex flex-col items-center justify-center text-[var(--aop-gold)] aop-desk">
@@ -332,6 +371,7 @@ function App() {
         handleMapUpload={handleMapUpload}
         handleMapFile={handleMapFile}
         startGame={startGame}
+        editNavalMap={editNavalMap}
         leaveRoom={leaveRoom}
         resetApp={resetApp}
         loading={loading}

@@ -26,6 +26,8 @@ import {
 } from '../game/mapPointer';
 import { sanitizeSvgMarkup } from '../game/mapImporter';
 import { resolveRegionBoundsInRootViewBox } from '../game/svgGeometry';
+import { listNavalRoutes } from '../game/navalRoutes';
+import { PHASES } from '../game/phases';
 import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
 
@@ -59,6 +61,10 @@ export const MapViewer = forwardRef(function MapViewer({
   localPlayerId,
   hideHud = false,
   className = '',
+  highlightSourceIds = [],
+  highlightTargetIds = [],
+  showNavalRoutes = false,
+  navalConfigActive = false,
 }, forwardedRef) {
   const containerRef = useRef(null);
   const transformRef = useRef(null);
@@ -96,7 +102,7 @@ export const MapViewer = forwardRef(function MapViewer({
   const lastActionKey = focusActionKey(lastAction);
   const actionType = lastAction?.type || null;
   const actionActorId = lastAction?.actorId || null;
-  const actionRegionId = lastAction?.regionId || null;
+  const actionRegionId = lastAction?.targetId || lastAction?.regionId || null;
   const actionRegionBounds = actionRegionId
     ? roomData.mapDefinition?.regionsById?.[actionRegionId]?.bounds || null
     : null;
@@ -112,6 +118,10 @@ export const MapViewer = forwardRef(function MapViewer({
     return [id, ownerId, roomData.players?.[ownerId]?.color || ''];
   })), [roomData.claims, roomData.mapDefinition?.regionIds, roomData.players]);
   const legalFingerprint = useMemo(() => [...legalClaims].sort().join('|'), [legalClaims]);
+  const sourceFingerprint = useMemo(() => [...highlightSourceIds].sort().join('|'), [highlightSourceIds]);
+  const targetFingerprint = useMemo(() => [...highlightTargetIds].sort().join('|'), [highlightTargetIds]);
+  const navalRoutes = useMemo(() => listNavalRoutes(roomData.mapDefinition), [roomData.mapDefinition]);
+  const militaryVisible = [PHASES.MOBILIZATION, PHASES.WAR, PHASES.FINISHED].includes(roomData.phase);
 
   const renderCamera = (camera, { clamp = false } = {}) => {
     if (!camera || !transformRef.current) return;
@@ -259,16 +269,20 @@ export const MapViewer = forwardRef(function MapViewer({
     const root = svgRef.current;
     if (!root) return;
     const legal = new Set(legalFingerprint ? legalFingerprint.split('|') : []);
+    const sources = new Set(sourceFingerprint ? sourceFingerprint.split('|') : []);
+    const targets = new Set(targetFingerprint ? targetFingerprint.split('|') : []);
     const paints = new Map(JSON.parse(paintFingerprint).map(([id, ownerId, color]) => [id, { ownerId, color }]));
     root.querySelectorAll('[data-region-id]').forEach((element) => {
       const id = element.getAttribute('data-region-id');
       const paint = paints.get(id);
       element.classList.toggle('selected-land', id === selectedId);
       element.classList.toggle('legal-land', legal.has(id));
+      element.classList.toggle('source-land', sources.has(id));
+      element.classList.toggle('target-land', targets.has(id));
       element.classList.toggle('owned-land', Boolean(paint?.ownerId));
       element.style.fill = paint?.color || '#b7a370';
     });
-  }, [legalFingerprint, paintFingerprint, safeMapSvg, selectedId]);
+  }, [legalFingerprint, paintFingerprint, safeMapSvg, selectedId, sourceFingerprint, targetFingerprint]);
 
   useEffect(() => {
     const bounds = normalizeBounds(viewBox);
@@ -338,7 +352,7 @@ export const MapViewer = forwardRef(function MapViewer({
     } : null;
     const result = reduceFocusAction(focusStateRef.current, action, localPlayerId);
     focusStateRef.current = result.state;
-    if (result.effect?.type === 'remote_claim') {
+    if (result.effect?.type === 'remote_claim' || result.effect?.type === 'remote_operation') {
       queueRemoteClaimFocus(result.effect.regionId, actionRegionBounds, result.effect.actionId);
     }
     // Event identity and primitive region bounds are the only focus dependencies.
@@ -528,6 +542,37 @@ export const MapViewer = forwardRef(function MapViewer({
         {safeMapSvg && (
           <div ref={svgRef} dangerouslySetInnerHTML={{ __html: safeMapSvg }}/>
         )}
+        {(militaryVisible || showNavalRoutes) && viewBox && (
+          <svg
+            className="aop-world-overlay"
+            viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
+            style={{ left: viewBox.x, top: viewBox.y, width: viewBox.width, height: viewBox.height }}
+            aria-hidden="true"
+          >
+            {showNavalRoutes && navalRoutes.map(([firstId, secondId]) => {
+              const first = roomData.mapDefinition?.regionsById?.[firstId]?.bounds;
+              const second = roomData.mapDefinition?.regionsById?.[secondId]?.bounds;
+              if (!first || !second) return null;
+              return <line key={`${firstId}:${secondId}`} className="aop-sea-route" x1={first.x + first.width / 2} y1={first.y + first.height / 2} x2={second.x + second.width / 2} y2={second.y + second.height / 2}/>;
+            })}
+            {militaryVisible && (roomData.mapDefinition?.regionIds || []).map((id) => {
+              const bounds = roomData.mapDefinition?.regionsById?.[id]?.bounds;
+              const claim = roomData.claims?.[id];
+              if (!bounds || !claim) return null;
+              const x = bounds.x + bounds.width / 2;
+              const y = bounds.y + bounds.height / 2;
+              const soldiers = `${Math.floor((claim.soldiers || 0) / 1000)}K`;
+              const infrastructure = `${claim.hasPort ? '⚓' : ''}${claim.ships ? ` ${claim.ships}⛵` : ''}`;
+              return (
+                <g key={id} className="aop-military-marker" transform={`translate(${x} ${y})`}>
+                  <rect x="-19" y="-10" width="38" height={infrastructure ? 26 : 18} rx="3"/>
+                  <text textAnchor="middle" y="3">{soldiers}</text>
+                  {infrastructure && <text className="infra" textAnchor="middle" y="13">{infrastructure}</text>}
+                </g>
+              );
+            })}
+          </svg>
+        )}
       </div>
 
       {!hideHud && (
@@ -538,6 +583,7 @@ export const MapViewer = forwardRef(function MapViewer({
           <button className="aop-map-leave" onClick={leaveRoom} aria-label="Odadan ayrıl"><Icon p={Icons.LogOut}/></button>
         </div>
       )}
+      {navalConfigActive && <div className="aop-map-mode-label">DENİZ ROTASI DÜZENLEME</div>}
       <div className="aop-map-controls" aria-label="Harita görünümü" onPointerDown={(event) => event.stopPropagation()}>
         <button onClick={() => zoomBy(1.25)} aria-label="Yakınlaştır"><Icon p={Icons.ZoomIn}/></button>
         <button onClick={() => zoomBy(0.8)} aria-label="Uzaklaştır"><Icon p={Icons.ZoomOut}/></button>

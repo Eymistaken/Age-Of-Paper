@@ -4,15 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MapViewer } from './MapViewer';
 
 const region = {
-  id: 'california', name: 'California', price: 5000, income: 500,
+  id: 'a', name: 'A', price: 5000, income: 500,
   claimNeighbors: [], bounds: { x: 10, y: 10, width: 30, height: 20 },
 };
 const roomData = {
-  mapSvg: '<svg viewBox="0 0 100 60"><rect data-region="true" data-region-id="california" id="california" x="10" y="10" width="30" height="20"/></svg>',
+  mapSvg: '<svg viewBox="0 0 100 60"><rect data-region="true" data-region-id="a" id="a" x="10" y="10" width="30" height="20"/></svg>',
   mapDefinition: {
     viewBox: { x: 0, y: 0, width: 100, height: 60 },
-    regionIds: ['california'],
-    regionsById: { california: region },
+    regionIds: ['a'],
+    regionsById: { a: region },
   },
   claims: {}, players: {}, lastAction: null, turnOrder: [], turnIndex: 0,
 };
@@ -42,7 +42,7 @@ async function renderMap() {
         roomCode="ABCD"
         selectedId={null}
         setSelectedId={setSelectedId}
-        legalClaims={['california']}
+        legalClaims={['a']}
         localPlayerId="me"
         leaveRoom={() => {}}
       />,
@@ -76,25 +76,25 @@ afterEach(async () => {
 describe('MapViewer pointer interactions', () => {
   it('selects on mouse press/release without eager pointer capture', async () => {
     const map = await renderMap();
-    const mapRegion = container.querySelector('[data-region-id="california"]');
+    const mapRegion = container.querySelector('[data-region-id="a"]');
     await act(async () => {
       mapRegion.dispatchEvent(pointerEvent('pointerdown'));
       expect(map.setPointerCapture).not.toHaveBeenCalled();
       map.dispatchEvent(pointerEvent('pointerup'));
     });
     expect(setSelectedId).toHaveBeenCalledOnce();
-    expect(setSelectedId).toHaveBeenCalledWith('california');
+    expect(setSelectedId).toHaveBeenCalledWith('a');
   });
 
   it('allows 3px mouse jitter but captures and pans above threshold', async () => {
     const map = await renderMap();
-    const mapRegion = container.querySelector('[data-region-id="california"]');
+    const mapRegion = container.querySelector('[data-region-id="a"]');
     await act(async () => {
       mapRegion.dispatchEvent(pointerEvent('pointerdown'));
       map.dispatchEvent(pointerEvent('pointermove', { clientX: 103, clientY: 102 }));
       map.dispatchEvent(pointerEvent('pointerup', { clientX: 103, clientY: 102 }));
     });
-    expect(setSelectedId).toHaveBeenCalledWith('california');
+    expect(setSelectedId).toHaveBeenCalledWith('a');
     setSelectedId.mockClear();
     await act(async () => {
       mapRegion.dispatchEvent(pointerEvent('pointerdown'));
@@ -107,17 +107,17 @@ describe('MapViewer pointer interactions', () => {
 
   it('uses the stored down-target even when pointerup is delivered to the captured container', async () => {
     const map = await renderMap();
-    const mapRegion = container.querySelector('[data-region-id="california"]');
+    const mapRegion = container.querySelector('[data-region-id="a"]');
     await act(async () => {
       mapRegion.dispatchEvent(pointerEvent('pointerdown'));
       map.dispatchEvent(pointerEvent('pointerup'));
     });
-    expect(setSelectedId).toHaveBeenCalledWith('california');
+    expect(setSelectedId).toHaveBeenCalledWith('a');
   });
 
   it('does not select blank map, HUD/zoom controls, or non-primary mouse buttons', async () => {
     const map = await renderMap();
-    const mapRegion = container.querySelector('[data-region-id="california"]');
+    const mapRegion = container.querySelector('[data-region-id="a"]');
     await act(async () => {
       map.dispatchEvent(pointerEvent('pointerdown'));
       map.dispatchEvent(pointerEvent('pointerup'));
@@ -135,12 +135,12 @@ describe('MapViewer pointer interactions', () => {
 
   it('selects a touch tap but not touch pan or pinch ghost release', async () => {
     const map = await renderMap();
-    const mapRegion = container.querySelector('[data-region-id="california"]');
+    const mapRegion = container.querySelector('[data-region-id="a"]');
     await act(async () => {
       mapRegion.dispatchEvent(pointerEvent('pointerdown', { pointerType: 'touch' }));
       map.dispatchEvent(pointerEvent('pointerup', { pointerType: 'touch' }));
     });
-    expect(setSelectedId).toHaveBeenCalledWith('california');
+    expect(setSelectedId).toHaveBeenCalledWith('a');
     setSelectedId.mockClear();
     await act(async () => {
       mapRegion.dispatchEvent(pointerEvent('pointerdown', { pointerType: 'touch' }));

@@ -8,14 +8,23 @@ import { LoginScreen } from './LoginScreen';
 import { WaitingRoom } from './WaitingRoom';
 
 const serviceMocks = vi.hoisted(() => ({
+  attackRegion: vi.fn().mockResolvedValue(true),
   acceptJoinRequest: vi.fn().mockResolvedValue(true),
+  buildPort: vi.fn().mockResolvedValue(true),
+  buyShips: vi.fn().mockResolvedValue(true),
   clearClosedJoinRequest: vi.fn().mockResolvedValue(false),
   claimRegion: vi.fn().mockResolvedValue('claiming'),
   expireJoinRequest: vi.fn().mockResolvedValue(false),
   rejectJoinRequest: vi.fn().mockResolvedValue(true),
+  recruitSoldiers: vi.fn().mockResolvedValue(true),
   saveIncome: vi.fn().mockResolvedValue(5000),
   sendChatMessage: vi.fn().mockResolvedValue(true),
   skipOfflineTurn: vi.fn().mockResolvedValue(true),
+  endWarTurn: vi.fn().mockResolvedValue(true),
+  finishMobilizationTurn: vi.fn().mockResolvedValue(true),
+  grantCurrentTurnIncome: vi.fn().mockResolvedValue(0),
+  startMobilization: vi.fn().mockResolvedValue(true),
+  transferTroops: vi.fn().mockResolvedValue(true),
   voteJoinRequest: vi.fn().mockResolvedValue(false),
 }));
 
@@ -240,8 +249,8 @@ describe('local application flow smoke', () => {
     await render(<GameRoom user={{ uid: 'p1' }} roomCode="ABCD" roomData={claimingRoom} leaveRoom={() => {}} resetApp={() => {}}/>);
     expect(container.querySelector('.aop-mobile-game')).not.toBeNull();
     expect(container.textContent).toContain('Hazine');
-    expect(container.textContent).toContain('Biriktirme getirisi');
-    expect(container.textContent).toContain('Round');
+    expect(container.textContent).toContain('Tur Geliri');
+    expect(container.textContent).toContain('Evre');
   });
 
   it('offers save-income as the only non-claim turn choice', async () => {
@@ -287,6 +296,43 @@ describe('local application flow smoke', () => {
     await render(<ClaimCompletePanel roomData={completed} roomCode="ABCD" leaveRoom={() => {}}/>);
     expect(container.textContent).toContain('Toprak edinme evresi tamamlandı');
     expect(container.textContent).toContain('5.500');
-    expect(container.textContent).toContain('ileride savaş evresi');
+    expect(container.textContent).toContain('Seferberliği Başlat');
+  });
+
+  it('renders explicit desktop war modes and contextual source highlights', async () => {
+    const regions = [
+      { id: 'a', name: 'A', price: 5000, income: 500, coastal: false, seaNeighbors: [], landNeighbors: ['b'], claimNeighbors: ['b'] },
+      { id: 'b', name: 'B', price: 5000, income: 500, coastal: false, seaNeighbors: [], landNeighbors: ['a'], claimNeighbors: ['a'] },
+    ];
+    const warRoom = {
+      ...claimingRoom,
+      schemaVersion: 4,
+      phase: PHASES.WAR,
+      mapDefinition: { version: 1, regionIds: ['a', 'b'], regions, regionsById: Object.fromEntries(regions.map((item) => [item.id, item])) },
+      mapSvg: '<svg viewBox="0 0 20 10"><rect id="a" data-region="true" data-region-id="a" width="10" height="10"/><rect id="b" data-region="true" data-region-id="b" x="10" width="10" height="10"/></svg>',
+      players: {
+        p1: { ...player, eliminated: false, regionIds: ['a'], income: 5500, lastIncomeTurn: 3 },
+        p2: { ...player, id: 'p2', name: 'Bora', eliminated: false, regionIds: ['b'], income: 5500, lastIncomeTurn: 2 },
+      },
+      claims: {
+        a: { ownerId: 'p1', soldiers: 3000, hasPort: false, ships: 0 },
+        b: { ownerId: 'p2', soldiers: 1000, hasPort: false, ships: 0 },
+      },
+      turnOrder: ['p1', 'p2'], turnIndex: 0, turnNumber: 3,
+    };
+    await render(<GameRoom user={{ uid: 'p1' }} roomCode="ABCD" roomData={warRoom} leaveRoom={() => {}} resetApp={() => {}}/>);
+    const attackButton = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Kara Saldırısı');
+    await act(async () => attackButton.click());
+    expect(container.textContent).toContain('Kaynak');
+    expect(container.querySelector('[data-region-id="a"]').classList.contains('source-land')).toBe(true);
+    expect(container.querySelector('[data-region-id="b"]').classList.contains('source-land')).toBe(false);
+    const source = container.querySelector('[data-region-id="a"]');
+    const pointer = (type) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, { pointerId: { value: 7 }, pointerType: { value: 'mouse' }, button: { value: 0 }, clientX: { value: 5 }, clientY: { value: 5 } });
+      return event;
+    };
+    await act(async () => { source.dispatchEvent(pointer('pointerdown')); source.dispatchEvent(pointer('pointerup')); });
+    expect(container.textContent).toContain('KaynakA');
   });
 });

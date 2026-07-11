@@ -2,18 +2,18 @@ export const PHASES = Object.freeze({
   LOBBY: 'lobby',
   CLAIMING: 'claiming',
   CLAIM_COMPLETE: 'claim_complete',
+  MOBILIZATION: 'mobilization',
+  WAR: 'war',
+  FINISHED: 'finished',
 });
-
-export const FUTURE_PHASES = Object.freeze([
-  'mobilization',
-  'war',
-  'finished',
-]);
 
 const TRANSITIONS = Object.freeze({
   [PHASES.LOBBY]: [PHASES.CLAIMING],
   [PHASES.CLAIMING]: [PHASES.CLAIM_COMPLETE],
-  [PHASES.CLAIM_COMPLETE]: [],
+  [PHASES.CLAIM_COMPLETE]: [PHASES.MOBILIZATION, PHASES.FINISHED],
+  [PHASES.MOBILIZATION]: [PHASES.WAR, PHASES.FINISHED],
+  [PHASES.WAR]: [PHASES.FINISHED],
+  [PHASES.FINISHED]: [],
 });
 
 export function canTransitionPhase(from, to) {

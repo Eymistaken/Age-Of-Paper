@@ -147,6 +147,7 @@ export function importSvgMap(svgText) {
     const commonNeighbors = element.getAttribute('data-neighbors');
     const claimValue = element.getAttribute('data-claim-neighbors') ?? commonNeighbors;
     const landValue = element.getAttribute('data-land-neighbors') ?? commonNeighbors;
+    const seaValue = element.getAttribute('data-sea-neighbors');
 
     element.setAttribute('id', id);
     element.setAttribute('data-region-id', id);
@@ -164,6 +165,7 @@ export function importSvgMap(svgText) {
       coastal: parseBoolean(element.getAttribute('data-coastal')) || /coast|coastal/i.test(element.getAttribute('class') || ''),
       claimTokens: claimValue === null ? null : splitNeighborIds(claimValue),
       landTokens: landValue === null ? null : splitNeighborIds(landValue),
+      seaTokens: seaValue === null ? [] : splitNeighborIds(seaValue),
     });
   });
 
@@ -254,6 +256,7 @@ export function importSvgMap(svgText) {
       landNeighbors: [...landGraph.get(record.id)],
       claimNeighbors: [...claimGraph.get(record.id)],
       coastal: record.coastal,
+      seaNeighbors: resolveTokens(record.seaTokens),
     };
   });
 

@@ -8,17 +8,17 @@ describe('SVG map importer', () => {
         <script>alert(1)</script>
         <defs><path id="template" d="M0 0 L5 0 L5 5 Z" /></defs>
         <rect id="water" class="water" width="100" height="50" />
-        <path id="north.east" data-region="true" data-name="Kuzey" data-price="4000" data-income="700" data-neighbors="south" onclick="evil()" d="M0 0 L50 0 L50 50 L0 50 Z" />
-        <path id="south" data-region="true" data-name="Güney" data-price="5000" data-income="800" data-neighbors="north.east" d="M50 0 L100 0 L100 50 L50 50 Z" />
+        <path id="region.a" data-region="true" data-name="A" data-price="4000" data-income="700" data-neighbors="b" onclick="evil()" d="M0 0 L50 0 L50 50 L0 50 Z" />
+        <path id="b" data-region="true" data-name="B" data-price="5000" data-income="800" data-neighbors="region.a" d="M50 0 L100 0 L100 50 L50 50 Z" />
         <image href="https://example.com/tracker.png" />
       </svg>`;
     const result = importSvgMap(svg);
-    expect(result.mapDefinition.regionIds).toEqual(['north_east', 'south']);
+    expect(result.mapDefinition.regionIds).toEqual(['region_a', 'b']);
     expect(result.mapDefinition.pricingVersion).toBe(2);
     expect(result.mapDefinition.geometryVersion).toBe(2);
     expect(result.mapDefinition.boundsSpace).toBe('viewBox');
-    expect(result.mapDefinition.regionsById.north_east).toMatchObject({ price: 4000, income: 700 });
-    expect(result.mapDefinition.regionsById.south).toMatchObject({ price: 5000, income: 800 });
+    expect(result.mapDefinition.regionsById.region_a).toMatchObject({ price: 4000, income: 700 });
+    expect(result.mapDefinition.regionsById.b).toMatchObject({ price: 5000, income: 800 });
     expect(result.validation.valid).toBe(true);
     expect(result.sanitizedSvg).not.toContain('<script');
     expect(result.sanitizedSvg).not.toContain('onclick');
@@ -85,5 +85,16 @@ describe('SVG map importer', () => {
     const result = importSvgMap(svg);
     expect(result.validation.valid).toBe(false);
     expect(result.validation.errors.map((item) => item.code)).toContain('DUPLICATE_ID');
+  });
+
+  it('imports generic coastal and bidirectional sea-route metadata', () => {
+    const svg = `<svg viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">
+      <rect id="a" data-region="true" data-neighbors="b" data-coastal="true" data-sea-neighbors="b" width="50" height="50" />
+      <rect id="b" data-region="true" data-neighbors="a" data-coastal="true" data-sea-neighbors="a" x="50" width="50" height="50" />
+    </svg>`;
+    const result = importSvgMap(svg);
+    expect(result.validation.valid).toBe(true);
+    expect(result.mapDefinition.regionsById.a).toMatchObject({ coastal: true, seaNeighbors: ['b'] });
+    expect(result.mapDefinition.regionsById.b).toMatchObject({ coastal: true, seaNeighbors: ['a'] });
   });
 });

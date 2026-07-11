@@ -189,6 +189,14 @@
 .default-land.owned-land { opacity: .96; }
 .default-land.legal-land { stroke: var(--aop-gold); stroke-width: 3px; opacity: 1; }
 .default-land.selected-land { stroke: var(--aop-paper-light); stroke-width: 4px; opacity: 1; filter: drop-shadow(0 0 2px rgba(40,35,22,.75)); }
+.default-land.source-land { stroke: #245f63; stroke-width: 4px; opacity: 1; }
+.default-land.target-land { stroke: #a8453e; stroke-width: 4px; stroke-dasharray: 5 3; opacity: 1; }
+.aop-world-overlay { position: absolute; z-index: 4; overflow: visible; pointer-events: none; }
+.aop-sea-route { fill: none; stroke: #246b70; stroke-width: 2.2; stroke-dasharray: 8 6; opacity: .8; vector-effect: non-scaling-stroke; }
+.aop-military-marker rect { fill: rgba(23,22,15,.92); stroke: #76592b; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.aop-military-marker text { fill: #ead9a7; font-family: 'Work Sans', sans-serif; font-size: 9px; font-weight: 800; paint-order: stroke; stroke: #17160f; stroke-width: 1.5px; }
+.aop-military-marker text.infra { fill: #9fc4c0; font-size: 6px; stroke-width: 1px; }
+.aop-map-mode-label { position: absolute; top: 12px; left: 12px; z-index: 14; padding: 7px 10px; border: 1px solid #246b70; border-radius: var(--aop-radius); background: var(--aop-panel-deep); color: #9fc4c0; font-size: .65rem; font-weight: 800; letter-spacing: .08em; pointer-events: none; }
 .aop-map-hud { position: absolute; top: 15px; left: 50%; z-index: 10; display: flex; min-height: 54px; align-items: stretch; transform: translateX(-50%); border: 2px solid var(--aop-bronze); border-radius: var(--aop-radius); background: var(--aop-panel); }
 .aop-map-hud > span { display: flex; min-width: 84px; align-items: center; justify-content: center; flex-direction: column; padding: 6px 12px; border-right: 1px solid var(--aop-line); }
 .aop-map-hud > span:first-child { flex-direction: row; gap: 8px; }
@@ -272,6 +280,20 @@
 .aop-map-dropzone.is-dragging { transform: translateY(-2px); }
 .aop-map-dropzone.is-loading { cursor: wait; opacity: .72; }
 .aop-map-dropzone small { color: var(--aop-muted); font-size: .72rem; }
+.aop-naval-editor { margin-top: 24px; padding: 20px; }
+.aop-naval-editor-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.aop-naval-editor-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(260px, .75fr); gap: 16px; }
+.aop-lobby-map-wrap { min-height: 420px; overflow: hidden; border: 2px solid var(--aop-bronze); border-radius: var(--aop-radius); }
+.aop-lobby-map { width: 100%; height: 100%; min-height: 420px; }
+.aop-naval-controls { display: grid; align-content: start; gap: 10px; min-width: 0; }
+.aop-route-list { display: grid; max-height: 210px; gap: 6px; overflow-y: auto; }
+.aop-route-list > div { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 1px solid var(--aop-line); border-radius: var(--aop-radius); background: var(--aop-panel-deep); }
+.aop-route-list span { min-width: 0; overflow: hidden; color: var(--aop-paper-light); font-size: .76rem; text-overflow: ellipsis; white-space: nowrap; }
+.aop-route-list button, .aop-route-confirm button { min-height: 36px; padding: 5px 8px; border: 1px solid var(--aop-bronze); border-radius: var(--aop-radius); background: var(--aop-panel); color: var(--aop-gold); font-size: .67rem; font-weight: 700; }
+.aop-route-list p { margin: 0; padding: 12px; border: 1px dashed var(--aop-line); color: var(--aop-muted); font-size: .75rem; }
+.aop-route-confirm { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--aop-danger); border-radius: var(--aop-radius); background: var(--aop-panel-deep); }
+.aop-route-confirm p { margin: 0; color: var(--aop-paper-light); font-size: .75rem; }
+.aop-route-confirm div { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 
 .aop-request-waiting { display: grid; min-height: 100dvh; place-items: center; padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom)); }
 .aop-request-waiting-card { display: grid; width: min(520px, 100%); place-items: center; gap: 14px; padding: clamp(24px, 6vw, 44px); text-align: center; }
@@ -308,6 +330,35 @@
 .aop-result-player { display: flex; min-width: 0; align-items: center; gap: 8px; overflow: hidden; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .aop-result-player i { width: 12px; height: 12px; flex: 0 0 12px; border: 1px solid var(--aop-ink); border-radius: 50%; }
 .aop-complete-leave { display: inline-flex; min-height: 48px; align-items: center; gap: 8px; margin-top: 22px; padding: 0 18px; }
+.aop-complete-start { display: block; width: min(360px, 100%); min-height: 54px; margin: 22px auto 0; padding: 0 18px; font-size: 1.05rem; }
+.aop-complete-wait { width: min(560px, 100%); margin: 22px auto 0; }
+.aop-victory-sheet { width: min(960px, 100%); }
+.aop-victory-chat { display: grid; max-width: 620px; height: min(290px, 38dvh); margin: 22px auto 0; overflow: hidden; border: 1px solid var(--aop-bronze); border-radius: var(--aop-radius); grid-template-rows: auto minmax(0,1fr) auto; text-align: left; }
+.aop-victory-chat > .aop-label { padding: 10px 14px; background: var(--aop-panel-deep); }
+
+.aop-war-orders { display: grid; gap: 12px; padding: 15px; border: 1px solid var(--aop-line); border-radius: var(--aop-radius); background: var(--aop-panel-deep); }
+.aop-war-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; margin: 0; }
+.aop-war-facts div { min-width: 0; padding: 7px; border: 1px solid var(--aop-line); border-radius: 3px; background: var(--aop-panel); }
+.aop-war-facts dt { color: var(--aop-muted); font-size: .58rem; font-weight: 700; text-transform: uppercase; }
+.aop-war-facts dd { margin: 3px 0 0; overflow: hidden; color: var(--aop-paper-light); font-size: .72rem; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.aop-logistics-actions { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 5px; }
+.aop-logistics-actions button, .aop-operation-picker button { min-width: 0; min-height: 48px; padding: 6px 3px; border: 1px solid var(--aop-bronze); border-radius: var(--aop-radius); background: var(--aop-panel); color: var(--aop-paper-light); font-size: .68rem; font-weight: 700; }
+.aop-logistics-actions small { color: var(--aop-muted); font-size: .55rem; }
+.aop-operation-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.aop-operation-picker button:nth-child(n+3) { border-color: var(--aop-danger); }
+.aop-operation-draft { display: grid; gap: 9px; padding: 10px; border: 1px solid #246b70; border-radius: var(--aop-radius); background: var(--aop-panel); }
+.aop-operation-route { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 7px; }
+.aop-operation-route span { display: flex; min-width: 0; flex-direction: column; }
+.aop-operation-route small { color: var(--aop-muted); font-size: .58rem; text-transform: uppercase; }
+.aop-operation-route strong { overflow: hidden; color: var(--aop-paper-light); font-size: .73rem; text-overflow: ellipsis; white-space: nowrap; }
+.aop-amount-control { display: grid; grid-template-columns: 1fr minmax(100px, .7fr); align-items: center; gap: 8px; color: var(--aop-muted); font-size: .7rem; font-weight: 700; }
+.aop-amount-control input { width: 100%; min-height: 44px; padding: 7px; border: 1px solid var(--aop-bronze); border-radius: var(--aop-radius); background: var(--aop-panel-deep); color: var(--aop-paper-light); }
+.aop-attack-confirm { display: grid; gap: 4px; padding: 9px; border: 1px solid var(--aop-danger); border-radius: var(--aop-radius); color: var(--aop-paper-light); font-size: .7rem; line-height: 1.35; }
+.aop-draft-actions { display: grid; grid-template-columns: .7fr 1.3fr; gap: 6px; }
+.aop-draft-actions button { min-height: 48px; padding: 6px; font-size: .68rem; }
+.aop-war-end { width: 100%; min-height: 50px; padding: 8px; }
+.aop-operation-warning { margin: 0; color: var(--aop-muted); font-size: .63rem; line-height: 1.4; }
+.aop-war-orders.is-compact { padding: 2px 1px 6px; border: 0; background: transparent; }
 
 .custom-scrollbar::-webkit-scrollbar, ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--aop-panel-deep); }
@@ -323,6 +374,13 @@
   .aop-result-header { display: none; }
   .aop-result-row { grid-template-columns: minmax(110px, 1.3fr) repeat(3, minmax(60px, .8fr)); padding: 10px 8px; font-size: .75rem; }
   .aop-complete-sheet { padding: 28px 13px; outline-offset: -6px; }
+}
+
+@media (max-width: 800px) {
+  .aop-naval-editor { padding: 14px; }
+  .aop-naval-editor-header { align-items: stretch; flex-direction: column; }
+  .aop-naval-editor-grid { grid-template-columns: 1fr; }
+  .aop-lobby-map-wrap, .aop-lobby-map { min-height: min(54dvh, 420px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -30,6 +30,7 @@ function player(id, index = 0) {
     joinedAt: now,
     lastActive: now,
     lastIncomeTurn: 0,
+    eliminated: false,
   };
 }
 
@@ -54,7 +55,7 @@ function pendingRequest(uid, requiredVoterIds = [], overrides = {}) {
 function roomData(playerIds = ['host', 'a'], overrides = {}) {
   const players = Object.fromEntries(playerIds.map((id, index) => [id, player(id, index)]));
   return {
-    schemaVersion: 2,
+    schemaVersion: 4,
     phase: 'claiming',
     hostId: 'host',
     createdAt: Timestamp.now(),
@@ -64,8 +65,8 @@ function roomData(playerIds = ['host', 'a'], overrides = {}) {
       pricingVersion: 2,
       regionIds: ['r1', 'r2'],
       regionsById: {
-        r1: { id: 'r1', price: 5000, income: 500, claimNeighbors: ['r2'] },
-        r2: { id: 'r2', price: 5000, income: 500, claimNeighbors: ['r1'] },
+        r1: { id: 'r1', price: 5000, income: 500, claimNeighbors: ['r2'], landNeighbors: ['r2'], coastal: true, seaNeighbors: ['r2'] },
+        r2: { id: 'r2', price: 5000, income: 500, claimNeighbors: ['r1'], landNeighbors: ['r1'], coastal: true, seaNeighbors: ['r1'] },
       },
     },
     mapValidation: { valid: true },
@@ -79,6 +80,10 @@ function roomData(playerIds = ['host', 'a'], overrides = {}) {
     lastAction: null,
     joinRequests: {},
     joinRequestAction: null,
+    mobilizationTurnsRemaining: 0,
+    mobilizationPending: [],
+    winnerId: null,
+    completedAt: null,
     ...overrides,
   };
 }
@@ -111,7 +116,7 @@ async function acceptUpdate(db, code, room, requesterId, actorId) {
 
 function economyRoom(overrides = {}) {
   const room = roomData(['host', 'a']);
-  const r3 = { id: 'r3', price: 5000, income: 500, claimNeighbors: ['r2'] };
+  const r3 = { id: 'r3', price: 5000, income: 500, claimNeighbors: ['r2'], landNeighbors: ['r2'], coastal: false, seaNeighbors: [] };
   return {
     ...room,
     mapDefinition: {
@@ -137,6 +142,66 @@ function nextTurn(room) {
     turnIndex,
     turnNumber: room.turnNumber + 1,
     roundNumber: room.roundNumber + (turnIndex === 0 ? 1 : 0),
+  };
+}
+
+function warRoom(overrides = {}) {
+  const base = roomData(['host', 'a']);
+  return {
+    ...base,
+    phase: 'war',
+    turnNumber: 3,
+    turnIndex: 0,
+    roundNumber: 2,
+    players: {
+      host: { ...base.players.host, money: 100_000, income: 5500, regionIds: ['r1'], lastIncomeTurn: 3 },
+      a: { ...base.players.a, money: 20_000, income: 5500, regionIds: ['r2'], lastIncomeTurn: 2 },
+    },
+    claims: {
+      r1: { ownerId: 'host', claimedAtTurn: 1, soldiers: 5000, hasPort: true, ships: 3 },
+      r2: { ownerId: 'a', claimedAtTurn: 2, soldiers: 2000, hasPort: true, ships: 2 },
+    },
+    ...overrides,
+  };
+}
+
+function recruitUpdate(room, overrides = {}) {
+  return {
+    players: { ...room.players, host: { ...room.players.host, money: 90_000 } },
+    claims: { ...room.claims, r1: { ...room.claims.r1, soldiers: 6000 } },
+    lastAction: {
+      type: 'recruit_soldiers', actorId: 'host', regionId: 'r1', count: 1, cost: 10_000,
+      turnNumber: 3, actionId: '3:recruit_soldiers:host:r1', at: Timestamp.now(),
+    },
+    ...overrides,
+  };
+}
+
+function captureUpdate(room, overrides = {}) {
+  return {
+    phase: 'finished',
+    players: {
+      host: { ...room.players.host, income: 6000, regionIds: ['r1', 'r2'] },
+      a: { ...room.players.a, income: 5000, regionIds: [], eliminated: true },
+    },
+    claims: {
+      r1: { ...room.claims.r1, soldiers: 2000 },
+      r2: { ...room.claims.r2, ownerId: 'host', soldiers: 1000, ships: 0 },
+    },
+    turnOrder: ['host'],
+    turnIndex: 0,
+    turnNumber: 4,
+    roundNumber: 2,
+    mobilizationTurnsRemaining: 0,
+    mobilizationPending: [],
+    winnerId: 'host',
+    completedAt: Timestamp.now(),
+    lastAction: {
+      type: 'land_attack', actorId: 'host', sourceId: 'r1', targetId: 'r2', amount: 3000,
+      previousOwnerId: 'a', success: true, winnerId: 'host', path: null,
+      turnNumber: 3, actionId: '3:land_attack:host:r2', at: Timestamp.now(),
+    },
+    ...overrides,
   };
 }
 
@@ -405,7 +470,7 @@ describe('single-choice turn economy security rules', () => {
     const claiming = economyRoom();
     const lobby = {
       ...claiming,
-      schemaVersion: 3,
+      schemaVersion: 4,
       phase: 'lobby',
       claims: {},
       turnOrder: [],
@@ -458,5 +523,56 @@ describe('single-choice turn economy security rules', () => {
     expect(stored.players.host.money).toBe(5000);
     expect(stored.turnNumber).toBe(room.turnNumber);
     expect(stored.turnIndex).toBe(room.turnIndex);
+  });
+});
+
+describe('mobilization and war security rules', () => {
+  it('allows exact recruiting without advancing and rejects wrong cost or enemy recruiting', async () => {
+    const room = warRoom();
+    await seed('RECRUIT', room);
+    await assertSucceeds(updateDoc(doc(context('host'), 'rooms', 'RECRUIT'), recruitUpdate(room)));
+
+    await seed('BAD_COST', room);
+    const wrongCost = recruitUpdate(room);
+    wrongCost.players.host.money = 95_000;
+    await assertFails(updateDoc(doc(context('host'), 'rooms', 'BAD_COST'), wrongCost));
+
+    await seed('ENEMY_BUY', room);
+    const enemy = recruitUpdate(room);
+    enemy.claims = { ...room.claims, r2: { ...room.claims.r2, soldiers: 3000 } };
+    enemy.lastAction.regionId = 'r2';
+    await assertFails(updateDoc(doc(context('host'), 'rooms', 'ENEMY_BUY'), enemy));
+  });
+
+  it('allows exact deterministic capture and rejects fake casualties', async () => {
+    const room = warRoom();
+    await seed('CAPTURE', room);
+    await assertSucceeds(updateDoc(doc(context('host'), 'rooms', 'CAPTURE'), captureUpdate(room)));
+
+    await seed('FAKE_COMBAT', room);
+    const fake = captureUpdate(room);
+    fake.claims.r2.soldiers = 2000;
+    await assertFails(updateDoc(doc(context('host'), 'rooms', 'FAKE_COMBAT'), fake));
+  });
+
+  it('rejects non-active attacks and naval attacks without ship capacity', async () => {
+    const room = warRoom();
+    const inactiveRoom = { ...room, turnIndex: 1 };
+    await seed('INACTIVE_WAR', inactiveRoom);
+    const inactive = captureUpdate(inactiveRoom);
+    await assertFails(updateDoc(doc(context('host'), 'rooms', 'INACTIVE_WAR'), inactive));
+
+    await seed('NO_CAPACITY', room);
+    const naval = captureUpdate(room);
+    naval.lastAction.type = 'naval_attack';
+    naval.claims.r1 = { ...naval.claims.r1, ships: room.claims.r1.ships };
+    naval.lastAction.amount = 4000;
+    await assertFails(updateDoc(doc(context('host'), 'rooms', 'NO_CAPACITY'), naval));
+  });
+
+  it('rejects every economy action after victory', async () => {
+    const room = { ...warRoom(), ...captureUpdate(warRoom()) };
+    await seed('FROZEN_WAR', room);
+    await assertFails(updateDoc(doc(context('host'), 'rooms', 'FROZEN_WAR'), recruitUpdate(room)));
   });
 });

@@ -1,0 +1,86 @@
+import { calculateIncome, safeMoney } from './economy';
+import { PHASES } from './phases';
+import {
+  PORT_COST,
+  SHIP_COST,
+  SOLDIER_BATCH,
+  SOLDIER_COST,
+  isPositiveInteger,
+} from './warConstants';
+
+export function isWarTurnPhase(phase) {
+  return phase === PHASES.MOBILIZATION || phase === PHASES.WAR;
+}
+
+export function grantTurnIncome(room, playerId = room?.turnOrder?.[room?.turnIndex]) {
+  const player = room?.players?.[playerId];
+  if (!isWarTurnPhase(room?.phase) || !player || player.eliminated || playerId !== room.turnOrder?.[room.turnIndex]) {
+    return { room, granted: 0, due: false };
+  }
+  if ((player.lastIncomeTurn || 0) >= room.turnNumber) return { room, granted: 0, due: false };
+  const income = calculateIncome(room.mapDefinition, room.claims, playerId);
+  return {
+    granted: income,
+    due: true,
+    room: {
+      ...room,
+      players: {
+        ...room.players,
+        [playerId]: {
+          ...player,
+          money: safeMoney(player.money) + income,
+          income,
+          lastIncomeTurn: room.turnNumber,
+        },
+      },
+    },
+  };
+}
+
+function logisticsBase(room, playerId, regionId) {
+  if (!isWarTurnPhase(room?.phase)) return { legal: false, code: 'WRONG_PHASE', reason: 'Lojistik yalnızca seferberlik veya savaş sırasında yapılabilir.' };
+  if (room.turnOrder?.[room.turnIndex] !== playerId) return { legal: false, code: 'NOT_ACTIVE', reason: 'Sıra sende değil.' };
+  const player = room.players?.[playerId];
+  if (!player || player.eliminated) return { legal: false, code: 'ELIMINATED', reason: 'Elendiğin için emir veremezsin.' };
+  const claim = room.claims?.[regionId];
+  if (!claim || claim.ownerId !== playerId) return { legal: false, code: 'NOT_OWNED', reason: 'Bu bölge senin yönetiminde değil.' };
+  const region = room.mapDefinition?.regionsById?.[regionId];
+  if (!region) return { legal: false, code: 'UNKNOWN_REGION', reason: 'Bölge harita tanımında bulunmuyor.' };
+  return { legal: true, player, claim, region };
+}
+
+function purchase(room, playerId, regionId, kind, count) {
+  const paid = grantTurnIncome(room, playerId).room;
+  const base = logisticsBase(paid, playerId, regionId);
+  if (!base.legal) return { room, eligibility: base };
+  if (!isPositiveInteger(count)) return { room, eligibility: { legal: false, code: 'INVALID_COUNT', reason: 'Adet pozitif bir tam sayı olmalı.' } };
+  const costs = { soldiers: SOLDIER_COST, port: PORT_COST, ships: SHIP_COST };
+  const cost = costs[kind] * count;
+  if (!Number.isSafeInteger(cost) || safeMoney(base.player.money) < cost) {
+    return { room, eligibility: { legal: false, code: 'INSUFFICIENT_FUNDS', reason: 'Hazinede yeterli altın yok.' } };
+  }
+  if (kind === 'port' && (!base.region.coastal || base.claim.hasPort)) {
+    return { room, eligibility: { legal: false, code: base.claim.hasPort ? 'HAS_PORT' : 'NOT_COASTAL', reason: base.claim.hasPort ? 'Bu bölgede zaten liman var.' : 'Liman yalnızca kıyı bölgesine kurulabilir.' } };
+  }
+  if (kind === 'ships' && (!base.region.coastal || !base.claim.hasPort)) {
+    return { room, eligibility: { legal: false, code: 'PORT_REQUIRED', reason: 'Gemi satın almak için kıyı bölgesinde liman gerekir.' } };
+  }
+  const claim = {
+    ...base.claim,
+    ...(kind === 'soldiers' ? { soldiers: base.claim.soldiers + SOLDIER_BATCH * count } : {}),
+    ...(kind === 'port' ? { hasPort: true } : {}),
+    ...(kind === 'ships' ? { ships: base.claim.ships + count } : {}),
+  };
+  return {
+    eligibility: { legal: true, code: 'AVAILABLE', cost, incomeGranted: paid.players[playerId].money - safeMoney(room.players[playerId].money) },
+    room: {
+      ...paid,
+      players: { ...paid.players, [playerId]: { ...paid.players[playerId], money: paid.players[playerId].money - cost } },
+      claims: { ...paid.claims, [regionId]: claim },
+    },
+  };
+}
+
+export const applyRecruitSoldiers = (room, playerId, regionId, batches) => purchase(room, playerId, regionId, 'soldiers', batches);
+export const applyBuildPort = (room, playerId, regionId) => purchase(room, playerId, regionId, 'port', 1);
+export const applyBuyShips = (room, playerId, regionId, count) => purchase(room, playerId, regionId, 'ships', count);

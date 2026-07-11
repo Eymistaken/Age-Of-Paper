@@ -23,6 +23,23 @@ import { PHASES } from '../game/phases';
 import { applyClaim, applySaveIncome, releasePlayerClaims } from '../game/rules';
 import { advanceTurn, getActivePlayerId, removePlayerFromTurnState } from '../game/turns';
 import { validateMapDefinition } from '../game/mapValidation';
+import { setNavalRoute, setRegionCoastal } from '../game/navalRoutes';
+import {
+  applyBuildPort,
+  applyBuyShips,
+  applyRecruitSoldiers,
+  grantTurnIncome,
+} from '../game/warEconomy';
+import {
+  applyMobilizationReady,
+  applyWarAttack,
+  applyWarEndTurn,
+  applyWarTransfer,
+  skipWarTurnState,
+  startMobilizationState,
+  surrenderPlayerState,
+} from '../game/warState';
+import { WAR_SCHEMA_VERSION } from '../game/warConstants';
 import {
   JOIN_REQUEST_STATUS,
   acceptJoinRequestState,
@@ -68,6 +85,7 @@ function makePlayer(userId, nickname, color, joinedAt = Timestamp.now()) {
     joinedAt,
     lastActive: Timestamp.now(),
     lastIncomeTurn: 0,
+    eliminated: false,
   };
 }
 
@@ -125,7 +143,7 @@ export async function createRoom(userId, nickname) {
         const snapshot = await transaction.get(reference);
         if (snapshot.exists()) throw new GameActionError('Oda kodu çakıştı.', 'ROOM_COLLISION');
         transaction.set(reference, {
-          schemaVersion: 3,
+          schemaVersion: WAR_SCHEMA_VERSION,
           phase: PHASES.LOBBY,
           hostId: userId,
           createdAt: serverTimestamp(),
@@ -142,6 +160,10 @@ export async function createRoom(userId, nickname) {
           lastAction: null,
           joinRequests: {},
           joinRequestAction: null,
+          mobilizationTurnsRemaining: 0,
+          mobilizationPending: [],
+          winnerId: null,
+          completedAt: null,
         });
       });
       return code;
@@ -342,23 +364,35 @@ export async function leaveRoom(roomCode, userId) {
       return;
     }
 
-    const turnState = removePlayerFromTurnState(room, userId);
-    const claims = room.phase === PHASES.CLAIMING
-      ? releasePlayerClaims(room.claims, userId)
-      : room.claims;
+    const isSurrender = [PHASES.CLAIM_COMPLETE, PHASES.MOBILIZATION, PHASES.WAR].includes(room.phase);
+    const surrender = isSurrender ? surrenderPlayerState(room, userId) : null;
+    const turnState = surrender?.room || removePlayerFromTurnState(room, userId);
+    const claims = isSurrender
+      ? surrender.room.claims
+      : room.phase === PHASES.CLAIMING
+        ? releasePlayerClaims(room.claims, userId)
+        : room.claims;
+    const now = Timestamp.now();
     transaction.update(reference, {
-      players,
+      players: surrender?.room.players || players,
       claims,
       hostId: room.hostId === userId ? oldestPlayerId(players) : room.hostId,
       turnOrder: turnState.turnOrder,
       turnIndex: turnState.turnIndex || 0,
       turnNumber: turnState.turnNumber || room.turnNumber || 0,
       roundNumber: turnState.roundNumber || room.roundNumber || 0,
+      phase: turnState.phase || room.phase,
+      mobilizationTurnsRemaining: turnState.mobilizationTurnsRemaining || 0,
+      mobilizationPending: turnState.mobilizationPending || [],
+      winnerId: turnState.winnerId || null,
+      completedAt: turnState.phase === PHASES.FINISHED ? now : (room.completedAt || null),
       lastAction: {
-        type: 'leave',
+        type: isSurrender ? 'surrender' : 'leave',
         actorId: userId,
         turnNumber: turnState.turnNumber || room.turnNumber || 0,
-        at: Timestamp.now(),
+        winnerId: turnState.winnerId || null,
+        actionId: actionId(room.turnNumber || 0, isSurrender ? 'surrender' : 'leave', userId),
+        at: now,
       },
     });
   });
@@ -380,6 +414,39 @@ export async function setRoomMap(roomCode, userId, importedMap) {
   });
 }
 
+export async function configureNavalMap(roomCode, userId, edit) {
+  return runTransaction(db, async (transaction) => {
+    const reference = roomRef(roomCode);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
+    const room = snapshot.data();
+    if (room.hostId !== userId) throw new GameActionError('Deniz rotalarını yalnızca kurucu düzenleyebilir.', 'HOST_ONLY');
+    if (room.phase !== PHASES.LOBBY) throw new GameActionError('Oyun başladıktan sonra deniz rotaları değiştirilemez.', 'ROOM_STARTED');
+    if (!room.mapDefinition) throw new GameActionError('Önce geçerli bir harita yükle.', 'INVALID_MAP');
+    const result = edit.type === 'coastal'
+      ? setRegionCoastal(room.mapDefinition, edit.regionId, edit.coastal, { removeRoutes: edit.removeRoutes === true })
+      : setNavalRoute(room.mapDefinition, edit.firstId, edit.secondId, edit.connected !== false);
+    if (!result.ok) throw new GameActionError(result.reason, result.code);
+    const validation = validateMapDefinition(result.mapDefinition);
+    transaction.update(reference, {
+      mapDefinition: result.mapDefinition,
+      mapValidation: validation,
+      lastAction: {
+        type: 'naval_config',
+        actorId: userId,
+        editType: edit.type,
+        regionId: edit.regionId || null,
+        firstId: edit.firstId || null,
+        secondId: edit.secondId || null,
+        connected: edit.connected !== false,
+        actionId: `naval_config:${userId}:${Date.now()}`,
+        at: Timestamp.now(),
+      },
+    });
+    return result;
+  });
+}
+
 export async function startGame(roomCode, userId) {
   await runTransaction(db, async (transaction) => {
     const reference = roomRef(roomCode);
@@ -398,6 +465,7 @@ export async function startGame(roomCode, userId) {
       income: BASE_INCOME,
       regionIds: [],
       lastIncomeTurn: 0,
+      eliminated: false,
     }]));
     transaction.update(reference, {
       phase: PHASES.CLAIMING,
@@ -417,6 +485,182 @@ function assertExpectedTurn(room, expectedTurnNumber) {
     throw new GameActionError('Bu hamlenin turu artık geçmiş.', 'STALE_TURN');
   }
 }
+
+function assertExpectedWarTurn(room, expectedTurnNumber) {
+  if (!Number.isInteger(expectedTurnNumber) || room.turnNumber !== expectedTurnNumber) {
+    throw new GameActionError('Bu emrin turu artık geçmiş.', 'STALE_TURN');
+  }
+}
+
+function assertWarSchema(room) {
+  if (room.schemaVersion !== WAR_SCHEMA_VERSION) {
+    throw new GameActionError('Bu oda güncel savaş şemasını kullanmıyor.', 'INCOMPATIBLE_ROOM');
+  }
+}
+
+function throwIfIllegal(result) {
+  if (!result?.eligibility?.legal) {
+    throw new GameActionError(result?.eligibility?.reason || 'Emir uygulanamadı.', result?.eligibility?.code);
+  }
+}
+
+function campaignFields(next, action, now = Timestamp.now()) {
+  return {
+    phase: next.phase,
+    players: next.players,
+    claims: next.claims,
+    turnOrder: next.turnOrder,
+    turnIndex: next.turnIndex,
+    turnNumber: next.turnNumber,
+    roundNumber: next.roundNumber,
+    mobilizationTurnsRemaining: next.mobilizationTurnsRemaining || 0,
+    mobilizationPending: next.mobilizationPending || [],
+    winnerId: next.winnerId || null,
+    completedAt: next.phase === PHASES.FINISHED ? (next.completedAt || now) : null,
+    lastAction: { ...action, at: now },
+  };
+}
+
+export async function startMobilization(roomCode, userId) {
+  return runTransaction(db, async (transaction) => {
+    const reference = roomRef(roomCode);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
+    const room = snapshot.data();
+    assertWarSchema(room);
+    const result = startMobilizationState(room, userId);
+    throwIfIllegal(result);
+    const next = result.room;
+    const now = Timestamp.now();
+    transaction.update(reference, campaignFields(next, {
+      type: 'mobilization_start',
+      actorId: userId,
+      turnNumber: next.turnNumber,
+      actionId: actionId(next.turnNumber, 'mobilization_start', userId),
+    }, now));
+    return true;
+  });
+}
+
+export async function grantCurrentTurnIncome(roomCode, userId, expectedTurnNumber) {
+  return runTransaction(db, async (transaction) => {
+    const reference = roomRef(roomCode);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
+    const room = snapshot.data();
+    assertWarSchema(room);
+    assertExpectedWarTurn(room, expectedTurnNumber);
+    if (getActivePlayerId(room) !== userId) throw new GameActionError('Sıra sende değil.', 'NOT_ACTIVE');
+    const result = grantTurnIncome(room, userId);
+    if (!result.due) return 0;
+    transaction.update(reference, {
+      players: result.room.players,
+      lastAction: {
+        type: 'turn_income', actorId: userId, amount: result.granted, turnNumber: room.turnNumber,
+        actionId: actionId(room.turnNumber, 'turn_income', userId), at: Timestamp.now(),
+      },
+    });
+    return result.granted;
+  });
+}
+
+async function runLogistics(roomCode, userId, expectedTurnNumber, type, regionId, count) {
+  return runTransaction(db, async (transaction) => {
+    const reference = roomRef(roomCode);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
+    const room = snapshot.data();
+    assertWarSchema(room);
+    assertExpectedWarTurn(room, expectedTurnNumber);
+    const result = type === 'recruit_soldiers'
+      ? applyRecruitSoldiers(room, userId, regionId, count)
+      : type === 'build_port'
+        ? applyBuildPort(room, userId, regionId)
+        : applyBuyShips(room, userId, regionId, count);
+    throwIfIllegal(result);
+    transaction.update(reference, {
+      players: result.room.players,
+      claims: result.room.claims,
+      lastAction: {
+        type, actorId: userId, regionId, count, cost: result.eligibility.cost,
+        turnNumber: room.turnNumber, actionId: actionId(room.turnNumber, type, userId, `${regionId}:${Date.now()}`), at: Timestamp.now(),
+      },
+    });
+    return result.eligibility;
+  });
+}
+
+export const recruitSoldiers = (roomCode, userId, regionId, batches, expectedTurnNumber) => (
+  runLogistics(roomCode, userId, expectedTurnNumber, 'recruit_soldiers', regionId, batches)
+);
+export const buildPort = (roomCode, userId, regionId, expectedTurnNumber) => (
+  runLogistics(roomCode, userId, expectedTurnNumber, 'build_port', regionId, 1)
+);
+export const buyShips = (roomCode, userId, regionId, count, expectedTurnNumber) => (
+  runLogistics(roomCode, userId, expectedTurnNumber, 'buy_ships', regionId, count)
+);
+
+export async function finishMobilizationTurn(roomCode, userId, expectedTurnNumber) {
+  return runTransaction(db, async (transaction) => {
+    const reference = roomRef(roomCode);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
+    const room = snapshot.data();
+    assertWarSchema(room);
+    assertExpectedWarTurn(room, expectedTurnNumber);
+    const result = applyMobilizationReady(room, userId);
+    throwIfIllegal(result);
+    const now = Timestamp.now();
+    transaction.update(reference, campaignFields(result.room, {
+      type: 'mobilization_ready', actorId: userId, turnNumber: room.turnNumber,
+      actionId: actionId(room.turnNumber, 'mobilization_ready', userId),
+    }, now));
+    return result.room.phase;
+  });
+}
+
+async function runOperation(roomCode, userId, expectedTurnNumber, operation) {
+  return runTransaction(db, async (transaction) => {
+    const reference = roomRef(roomCode);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
+    const room = snapshot.data();
+    assertWarSchema(room);
+    assertExpectedWarTurn(room, expectedTurnNumber);
+    let result;
+    if (operation.kind === 'end') result = applyWarEndTurn(room, userId);
+    else if (operation.kind === 'transfer') result = applyWarTransfer(room, userId, operation.sourceId, operation.targetId, operation.amount, operation.routeType);
+    else result = applyWarAttack(room, userId, operation.sourceId, operation.targetId, operation.amount, operation.routeType);
+    throwIfIllegal(result);
+    const type = operation.kind === 'end' ? 'end_war_turn' : `${operation.routeType}_${operation.kind}`;
+    const now = Timestamp.now();
+    const attack = result.eligibility.result;
+    transaction.update(reference, campaignFields(result.room, {
+      type,
+      actorId: userId,
+      sourceId: operation.sourceId || null,
+      targetId: operation.targetId || null,
+      amount: operation.amount || 0,
+      previousOwnerId: result.eligibility.previousOwnerId || null,
+      success: attack?.captured ?? null,
+      path: result.eligibility.path || null,
+      winnerId: result.room.winnerId || null,
+      turnNumber: room.turnNumber,
+      actionId: actionId(room.turnNumber, type, userId, operation.targetId || ''),
+    }, now));
+    return result.eligibility;
+  });
+}
+
+export const transferTroops = (roomCode, userId, routeType, sourceId, targetId, amount, expectedTurnNumber) => (
+  runOperation(roomCode, userId, expectedTurnNumber, { kind: 'transfer', routeType, sourceId, targetId, amount })
+);
+export const attackRegion = (roomCode, userId, routeType, sourceId, targetId, amount, expectedTurnNumber) => (
+  runOperation(roomCode, userId, expectedTurnNumber, { kind: 'attack', routeType, sourceId, targetId, amount })
+);
+export const endWarTurn = (roomCode, userId, expectedTurnNumber) => (
+  runOperation(roomCode, userId, expectedTurnNumber, { kind: 'end' })
+);
 
 function actionId(turnNumber, type, actorId, detail = '') {
   return [turnNumber, type, actorId, detail].filter(Boolean).join(':');
@@ -488,20 +732,23 @@ export async function skipOfflineTurn(roomCode, hostId, now = Date.now()) {
     const snapshot = await transaction.get(reference);
     if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
     const room = snapshot.data();
-    if (room.phase !== PHASES.CLAIMING) throw new GameActionError('Bu evrede sıra atlanamaz.', 'PHASE_FROZEN');
+    if (![PHASES.CLAIMING, PHASES.MOBILIZATION, PHASES.WAR].includes(room.phase)) throw new GameActionError('Bu evrede sıra atlanamaz.', 'PHASE_FROZEN');
     if (room.hostId !== hostId) throw new GameActionError('Sırayı yalnızca kurucu atlayabilir.', 'HOST_ONLY');
     const activeId = getActivePlayerId(room);
     const lastActive = timestampMillis(room.players?.[activeId]?.lastActive);
     if (!lastActive || now - lastActive < OFFLINE_SKIP_TIMEOUT) {
       throw new GameActionError('Oyuncu henüz sıra atlama süresini doldurmadı.', 'SKIP_TOO_EARLY');
     }
-    const next = advanceTurn(room);
-    transaction.update(reference, {
-      turnIndex: next.turnIndex,
-      turnNumber: next.turnNumber,
-      roundNumber: next.roundNumber,
-      lastAction: { type: 'skip_offline', actorId: hostId, targetId: activeId, turnNumber: room.turnNumber, at: Timestamp.now() },
-    });
+    if (room.phase !== PHASES.CLAIMING) assertWarSchema(room);
+    const result = room.phase === PHASES.CLAIMING
+      ? { room: advanceTurn(room), eligibility: { legal: true } }
+      : skipWarTurnState(room);
+    const next = result.room;
+    const nowTimestamp = Timestamp.now();
+    transaction.update(reference, campaignFields(next, {
+      type: 'skip_offline', actorId: hostId, targetId: activeId, skippedPhase: room.phase,
+      turnNumber: room.turnNumber, actionId: actionId(room.turnNumber, 'skip_offline', hostId, activeId),
+    }, nowTimestamp));
     return true;
   });
 }

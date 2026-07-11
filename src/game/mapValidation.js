@@ -73,7 +73,7 @@ export function validateMapDefinition(mapDefinition) {
       }
     }
 
-    for (const neighborField of ['landNeighbors', 'claimNeighbors']) {
+    for (const neighborField of ['landNeighbors', 'claimNeighbors', 'seaNeighbors']) {
       if (!Array.isArray(region?.[neighborField])) {
         errors.push(issue('INVALID_NEIGHBORS', `“${region?.id}” için ${neighborField} bir liste olmalı.`, region?.id));
       }
@@ -94,13 +94,27 @@ export function validateMapDefinition(mapDefinition) {
   const reverse = new Map(regions.map((region) => [region.id, []]));
 
   for (const region of regions) {
-    for (const field of ['landNeighbors', 'claimNeighbors']) {
+    for (const field of ['landNeighbors', 'claimNeighbors', 'seaNeighbors']) {
+      const seenNeighbors = new Set();
       for (const neighborId of Array.isArray(region[field]) ? region[field] : []) {
-        if (neighborId === region.id) {
+        if (seenNeighbors.has(neighborId)) {
+          errors.push(issue('DUPLICATE_ROUTE', `“${region.id}” için “${neighborId}” bağlantısı yineleniyor.`, region.id));
+        } else if (neighborId === region.id) {
           errors.push(issue('SELF_NEIGHBOR', `“${region.id}” kendisine komşu olamaz.`, region.id));
         } else if (!byId.has(neighborId)) {
           errors.push(issue('UNKNOWN_NEIGHBOR', `“${region.id}”, bilinmeyen “${neighborId}” bölgesine bağlanıyor.`, region.id));
         }
+        seenNeighbors.add(neighborId);
+      }
+    }
+
+    for (const neighborId of Array.isArray(region.seaNeighbors) ? region.seaNeighbors : []) {
+      const neighbor = byId.get(neighborId);
+      if (!region.coastal || (neighbor && !neighbor.coastal)) {
+        errors.push(issue('NON_COASTAL_ROUTE', `“${region.id}” deniz rotası yalnızca kıyı bölgelerini bağlayabilir.`, region.id));
+      }
+      if (neighbor && !neighbor.seaNeighbors?.includes(region.id)) {
+        errors.push(issue('ASYMMETRIC_SEA_ROUTE', `“${region.id}” ile “${neighborId}” arasındaki deniz rotası çift yönlü olmalı.`, region.id));
       }
     }
 
@@ -130,6 +144,10 @@ export function validateMapDefinition(mapDefinition) {
         `Claim grafiği her başlangıçtan tamamlanamıyor. Ulaşılamayan bölgeler: ${unreachable}.`,
       ));
     }
+  }
+
+  if (regions.some((region) => region.coastal) && !regions.some((region) => region.seaNeighbors?.length)) {
+    warnings.push(issue('COASTAL_WITHOUT_ROUTES', 'Kıyı bölgeleri var, ancak deniz rotası yapılandırılmamış. Harita kara oyunu için yine kullanılabilir.'));
   }
 
   return {

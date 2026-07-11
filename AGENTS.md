@@ -37,6 +37,16 @@ Camera or SVG geometry changes require fixtures for non-zero viewBoxes, translat
 
 Preserve the established regression contracts unless the task explicitly changes them: pricing v2, real SVG adjacency, at most 10 players, join requests, claim-complete, unread messages, mobile drawer snap behavior, and the one-action-per-turn `claim` versus `save_income` economy.
 
+## Mobilization & War Invariants
+
+Treat room schema version 4 as mandatory for combat mutations. The campaign phase order is `lobby` → `claiming` → `claim_complete` → `mobilization` → `war` → `finished`; the final claim freezes without advancing, and mobilization starts with the next active player. Keep naval topology map-driven with normalized `coastal` and symmetric `seaNeighbors` values. Never add geography-specific IDs or built-in routes.
+
+Grant mobilization/war income exactly once per `turnNumber` with `lastIncomeTurn`, inside every legal logistics/operation transaction as well as any optional feedback transaction. Logistics never advances the turn. Ready, transfer, attack, explicit war end, and offline skip advance once; skipped players receive no income. Use 1,000-soldier increments, persistent ship capacity, and deterministic subtraction combat only.
+
+Captures must atomically update claim ownership, both players' region lists and incomes, preserved ports, destroyed target ships, elimination, turn order, and possible victory. Surrender neutralizes soldiers and ships but preserves ports. Finished rooms freeze economy and military actions while keeping results and chat readable.
+
+War UI must keep explicit source/target interaction modes, inline attack confirmation, stale selection cancellation, and pending submission locks. Military badges and naval route lines use root SVG viewBox coordinates. Remote camera focus may react to remote transfers and attacks at the target region through the same strict bounded-measurement and exact-restoration pipeline used for claims; purchases, income, ready, chat, and presence never focus.
+
 ## Commit & Pull Request Guidelines
 
 Recent history uses Conventional Commit subjects such as `fix: rebalance automatic region pricing`. Use an imperative `type: summary` subject and keep commits scoped. Pull requests should explain behavior changes, list verification commands, link issues, and include desktop/mobile screenshots for UI work. Call out `firestore.rules` changes explicitly.

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { validateMapDefinition } from './mapValidation';
 
 const validRegions = [
-  { id: 'north', name: 'North', price: 4000, income: 500, landNeighbors: ['south'], claimNeighbors: ['south'], coastal: false },
-  { id: 'south', name: 'South', price: 5000, income: 600, landNeighbors: ['north'], claimNeighbors: ['north'], coastal: true },
+  { id: 'a', name: 'A', price: 4000, income: 500, landNeighbors: ['b'], claimNeighbors: ['b'], coastal: false, seaNeighbors: [] },
+  { id: 'b', name: 'B', price: 5000, income: 600, landNeighbors: ['a'], claimNeighbors: ['a'], coastal: true, seaNeighbors: [] },
 ];
 
 function definition(regions = validRegions) {
@@ -30,17 +30,17 @@ describe('map definition validation', () => {
 
   it('rejects self-neighboring regions', () => {
     const invalid = structuredClone(validRegions);
-    invalid[0].claimNeighbors = ['north'];
+    invalid[0].claimNeighbors = ['a'];
     expect(validateMapDefinition(definition(invalid)).errors.map((item) => item.code)).toContain('SELF_NEIGHBOR');
   });
 
   it('rejects duplicate and unsafe region IDs', () => {
     const duplicate = structuredClone(validRegions);
-    duplicate[1].id = 'north';
+    duplicate[1].id = 'a';
     expect(validateMapDefinition(definition(duplicate)).errors.map((item) => item.code)).toContain('DUPLICATE_ID');
 
     const unsafe = structuredClone(validRegions);
-    unsafe[0].id = 'north.east';
+    unsafe[0].id = 'a.invalid';
     expect(validateMapDefinition(definition(unsafe)).errors.map((item) => item.code)).toContain('UNSAFE_ID');
   });
 

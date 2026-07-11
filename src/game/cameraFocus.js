@@ -1,6 +1,6 @@
 export function focusActionKey(action) {
   if (!action) return null;
-  return action.actionId || [action.turnNumber, action.type, action.actorId, action.regionId || ''].join(':');
+  return action.actionId || [action.turnNumber, action.type, action.actorId, action.targetId || action.regionId || ''].join(':');
 }
 
 export function createFocusState(action) {
@@ -11,11 +11,19 @@ export function reduceFocusAction(state, action, localPlayerId) {
   const actionKey = focusActionKey(action);
   if (!actionKey || actionKey === state.processedActionKey) return { state, effect: null };
   const nextState = { processedActionKey: actionKey };
-  if (action.type !== 'claim' || action.actorId === localPlayerId || !action.regionId) {
+  const regionId = action.targetId || action.regionId;
+  const effectTypes = {
+    claim: 'remote_claim',
+    land_transfer: 'remote_operation',
+    naval_transfer: 'remote_operation',
+    land_attack: 'remote_operation',
+    naval_attack: 'remote_operation',
+  };
+  if (!effectTypes[action.type] || action.actorId === localPlayerId || !regionId) {
     return { state: nextState, effect: null };
   }
   return {
     state: nextState,
-    effect: { type: 'remote_claim', actionId: actionKey, regionId: action.regionId },
+    effect: { type: effectTypes[action.type], actionId: actionKey, regionId },
   };
 }

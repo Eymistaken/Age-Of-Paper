@@ -1,5 +1,7 @@
 import { Icon, Icons } from '../Icons';
 import { JoinRequestCards } from '../JoinRequestCards';
+import { PHASES } from '../../game/phases';
+import { WarCommandPanel } from '../WarCommandPanel';
 
 export const RightPanel = ({
   me,
@@ -19,6 +21,17 @@ export const RightPanel = ({
   rejectRequest,
   isHost,
   now,
+  selectedClaim,
+  warPlan,
+  setWarPlan,
+  beginWarPlan,
+  cancelWarPlan,
+  recruitSelected,
+  buildSelectedPort,
+  buySelectedShip,
+  readyMobilization,
+  finishWarTurn,
+  executeWarOperation,
 }) => (
   <aside className="aop-right-panel">
     <section className="aop-command-summary">
@@ -26,10 +39,19 @@ export const RightPanel = ({
       <div className="aop-label">Komutan</div>
       <h2 className="aop-title text-2xl">{me.name}</h2>
       <div className="aop-treasury"><Icon p={Icons.Coins} s={18}/>{(me.money || 0).toLocaleString('tr-TR')} altın</div>
-      <div className="aop-income">Para biriktirirsen +{currentIncome.toLocaleString('tr-TR')}</div>
+      <div className="aop-income">Tur geliri +{currentIncome.toLocaleString('tr-TR')}</div>
     </section>
 
-    <section className={`aop-order-sheet ${isMyTurn ? 'is-my-turn' : ''}`}>
+    {[PHASES.MOBILIZATION, PHASES.WAR].includes(roomData.phase) ? (
+      <WarCommandPanel
+        roomData={roomData} me={me} currentPlayer={currentPlayer} isMyTurn={isMyTurn}
+        selectedRegion={selectedRegion} selectedClaim={selectedClaim} selectedOwner={selectedOwner}
+        plan={warPlan} setPlan={setWarPlan} beginPlan={beginWarPlan} cancelPlan={cancelWarPlan}
+        actionPending={actionPending} actionError={actionError} onRecruit={recruitSelected}
+        onBuildPort={buildSelectedPort} onBuyShips={buySelectedShip} onReady={readyMobilization}
+        onExecuteOperation={executeWarOperation} onEndTurn={finishWarTurn}
+      />
+    ) : <section className={`aop-order-sheet ${isMyTurn ? 'is-my-turn' : ''}`}>
       <div className="aop-label">{isMyTurn ? 'Hamle Sırası Sende' : `Aktif: ${currentPlayer?.name || 'Bekleniyor'}`}</div>
       <h3 className="aop-title text-2xl mt-1">{selectedRegion?.name || 'Bölge seçilmedi'}</h3>
       {selectedRegion ? (
@@ -52,7 +74,7 @@ export const RightPanel = ({
         Para Biriktir
         <small>+{currentIncome.toLocaleString('tr-TR')} altın kazan ve sırayı geçir</small>
       </button>
-    </section>
+    </section>}
     {pendingJoinRequests.length > 0 && (
       <JoinRequestCards
         requests={pendingJoinRequests}

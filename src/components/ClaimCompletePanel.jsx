@@ -2,7 +2,7 @@ import { calculateIncome } from '../game/economy';
 import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
 
-export const ClaimCompletePanel = ({ roomData, roomCode, leaveRoom }) => {
+export const ClaimCompletePanel = ({ roomData, roomCode, leaveRoom, isHost, onStart, actionPending, actionError }) => {
   const players = (roomData.turnOrder || Object.keys(roomData.players || {}))
     .map((id) => roomData.players[id])
     .filter(Boolean);
@@ -12,7 +12,7 @@ export const ClaimCompletePanel = ({ roomData, roomCode, leaveRoom }) => {
         <div className="aop-label">Harita Kaydı Mühürlendi</div>
         <h1 className="aop-title">Toprak edinme evresi tamamlandı</h1>
         <p className="aop-complete-copy">
-          Haritadaki bütün oynanabilir bölgeler paylaşıldı. Tur eylemleri donduruldu; ileride savaş evresi bu sağlam kayıt üzerinden eklenecek.
+          Haritadaki bütün oynanabilir bölgeler paylaşıldı. Edinme emirleri donduruldu. Kurucu özeti kontrol edip seferberliği başlatacak.
         </p>
 
         <div className="aop-complete-room">
@@ -37,6 +37,14 @@ export const ClaimCompletePanel = ({ roomData, roomCode, leaveRoom }) => {
           })}
         </div>
 
+        {isHost ? (
+          <button onClick={onStart} disabled={actionPending} className="aop-button aop-complete-start">
+            {actionPending ? 'Sefer emri işleniyor…' : 'Seferberliği Başlat'}
+          </button>
+        ) : (
+          <p className="aop-validation-note aop-complete-wait">Kurucunun “Seferberliği Başlat” emri vermesi bekleniyor.</p>
+        )}
+        {actionError && <p className="aop-inline-error" role="alert">{actionError}</p>}
         <button onClick={leaveRoom} className="aop-button-secondary aop-complete-leave">
           <Icon p={Icons.LogOut} s={18}/> Odadan Ayrıl
         </button>

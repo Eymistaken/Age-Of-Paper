@@ -4,9 +4,9 @@ import { createFocusState, reduceFocusAction } from './cameraFocus';
 const action = (overrides = {}) => ({
   type: 'claim',
   actorId: 'other',
-  regionId: 'texas',
+  regionId: 'b',
   turnNumber: 4,
-  actionId: '4:claim:other:texas',
+  actionId: '4:claim:other:b',
   ...overrides,
 });
 
@@ -14,7 +14,7 @@ describe('camera focus event selection', () => {
   it('emits each new remote claim exactly once', () => {
     let state = createFocusState(null);
     let result = reduceFocusAction(state, action(), 'me');
-    expect(result.effect).toEqual({ type: 'remote_claim', actionId: action().actionId, regionId: 'texas' });
+    expect(result.effect).toEqual({ type: 'remote_claim', actionId: action().actionId, regionId: 'b' });
     state = result.state;
     result = reduceFocusAction(state, action(), 'me');
     expect(result.effect).toBeNull();
@@ -25,7 +25,7 @@ describe('camera focus event selection', () => {
     let result = reduceFocusAction(state, action({ type: 'save_income', regionId: undefined, actionId: '4:save:other' }), 'me');
     expect(result.effect).toBeNull();
     state = result.state;
-    result = reduceFocusAction(state, action({ actorId: 'me', actionId: '5:claim:me:texas' }), 'me');
+    result = reduceFocusAction(state, action({ actorId: 'me', actionId: '5:claim:me:b' }), 'me');
     expect(result.effect).toBeNull();
     expect(reduceFocusAction(result.state, null, 'me').effect).toBeNull();
   });
@@ -34,6 +34,15 @@ describe('camera focus event selection', () => {
     const oldAction = action();
     const state = createFocusState(oldAction);
     expect(reduceFocusAction(state, oldAction, 'me').effect).toBeNull();
+  });
+
+  it('focuses only meaningful remote movement and attack targets', () => {
+    const attack = action({ type: 'naval_attack', regionId: undefined, targetId: 'target_b', actionId: '8:naval_attack:other:target_b' });
+    expect(reduceFocusAction(createFocusState(null), attack, 'me').effect).toEqual({
+      type: 'remote_operation', actionId: attack.actionId, regionId: 'target_b',
+    });
+    const purchase = action({ type: 'buy_ships', regionId: 'source_a', actionId: '8:buy_ships:other:source_a' });
+    expect(reduceFocusAction(createFocusState(null), purchase, 'me').effect).toBeNull();
   });
 
   it('ignores heartbeat and presence snapshots that keep the same action ID', () => {

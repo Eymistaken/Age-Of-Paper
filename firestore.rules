@@ -11,8 +11,8 @@ service cloud.firestore {
 
     function validPlayer(player, uid) {
       return player is map
-        && player.keys().hasAll(['id', 'name', 'color', 'money', 'income', 'regionIds', 'joinedAt', 'lastActive', 'lastIncomeTurn'])
-        && player.keys().hasOnly(['id', 'name', 'color', 'money', 'income', 'regionIds', 'joinedAt', 'lastActive', 'lastIncomeTurn'])
+        && player.keys().hasAll(['id', 'name', 'color', 'money', 'income', 'regionIds', 'joinedAt', 'lastActive', 'lastIncomeTurn', 'eliminated'])
+        && player.keys().hasOnly(['id', 'name', 'color', 'money', 'income', 'regionIds', 'joinedAt', 'lastActive', 'lastIncomeTurn', 'eliminated'])
         && player.id == uid
         && player.name is string
         && player.name.size() > 0
@@ -26,7 +26,8 @@ service cloud.firestore {
         && player.joinedAt is timestamp
         && player.lastActive is timestamp
         && player.lastIncomeTurn is int
-        && player.lastIncomeTurn >= 0;
+        && player.lastIncomeTurn >= 0
+        && player.eliminated is bool;
     }
 
     function activePlayerId() {
@@ -38,6 +39,34 @@ service cloud.firestore {
       return request.resource.data.turnIndex == nextIndex
         && request.resource.data.turnNumber == resource.data.turnNumber + 1
         && request.resource.data.roundNumber == resource.data.roundNumber + (nextIndex == 0 ? 1 : 0);
+    }
+
+    function isCurrentWarSchema() {
+      return resource.data.schemaVersion == 4 && request.resource.data.schemaVersion == 4;
+    }
+
+    function isCampaignPhase(phase) {
+      return phase == 'mobilization' || phase == 'war';
+    }
+
+    function activeAndEligible() {
+      return request.auth.uid in resource.data.players
+        && resource.data.turnOrder.size() > 0
+        && activePlayerId() == request.auth.uid
+        && resource.data.players[request.auth.uid].eliminated == false;
+    }
+
+    function dueIncome(uid) {
+      return resource.data.players[uid].lastIncomeTurn < resource.data.turnNumber
+        ? resource.data.players[uid].income
+        : 0;
+    }
+
+    function validIncomeStamp(uid) {
+      return request.resource.data.players[uid].lastIncomeTurn
+          == (resource.data.players[uid].lastIncomeTurn < resource.data.turnNumber
+            ? resource.data.turnNumber
+            : resource.data.players[uid].lastIncomeTurn);
     }
 
     function validAction(type) {
@@ -239,7 +268,25 @@ service cloud.firestore {
             ? isClaim()
             : type == 'save_income'
               ? isSaveIncome()
-              : type == 'skip_offline' && isOfflineSkip();
+              : type == 'naval_config'
+                ? isNavalConfig()
+                : type == 'mobilization_start'
+                  ? isMobilizationStart()
+                  : type == 'turn_income'
+                    ? isTurnIncome()
+                    : (type == 'recruit_soldiers' || type == 'build_port' || type == 'buy_ships')
+                      ? isLogistics(type)
+                      : type == 'mobilization_ready'
+                        ? isMobilizationReady()
+                        : (type == 'land_transfer' || type == 'naval_transfer')
+                          ? isTransfer(type)
+                          : (type == 'land_attack' || type == 'naval_attack')
+                            ? isAttack(type)
+                            : type == 'end_war_turn'
+                              ? isWarEnd()
+                              : type == 'surrender'
+                                ? isSurrender()
+                                : type == 'skip_offline' && isOfflineSkip();
     }
 
     function isValidRoomUpdate() {
@@ -269,7 +316,8 @@ service cloud.firestore {
         && validPlayer(request.resource.data.players[request.auth.uid], request.auth.uid)
         && request.resource.data.players[request.auth.uid].money == 0
         && request.resource.data.players[request.auth.uid].income == 5000
-        && request.resource.data.players[request.auth.uid].regionIds.size() == 0;
+        && request.resource.data.players[request.auth.uid].regionIds.size() == 0
+        && request.resource.data.players[request.auth.uid].eliminated == false;
     }
 
     function isPresenceUpdate() {
@@ -390,14 +438,321 @@ service cloud.firestore {
 
     function isOfflineSkip() {
       let targetId = activePlayerId();
-      return resource.data.phase == 'claiming'
+      return (resource.data.phase == 'claiming' || isCampaignPhase(resource.data.phase))
         && resource.data.hostId == request.auth.uid
-        && request.resource.data.phase == 'claiming'
-        && roomChangesOnly(['turnIndex', 'turnNumber', 'roundNumber', 'lastAction'])
+        && roomChangesOnly([
+          'phase', 'players', 'claims', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber',
+          'mobilizationTurnsRemaining', 'mobilizationPending', 'winnerId', 'completedAt', 'lastAction'
+        ])
         && validAction('skip_offline')
         && request.resource.data.lastAction.targetId == targetId
         && resource.data.players[targetId].lastActive + duration.value(120, 's') <= request.time
-        && validTurnAdvance();
+        && request.resource.data.turnNumber == resource.data.turnNumber + 1
+        && (resource.data.phase != 'war' || request.resource.data.phase == 'war')
+        && request.resource.data.players[targetId] == resource.data.players[targetId];
+    }
+
+    function isNavalConfig() {
+      return resource.data.phase == 'lobby'
+        && request.resource.data.phase == 'lobby'
+        && resource.data.hostId == request.auth.uid
+        && validAction('naval_config')
+        && roomChangesOnly(['mapDefinition', 'mapValidation', 'lastAction'])
+        && request.resource.data.mapDefinition.version == 1
+        && request.resource.data.mapDefinition.regionIds == resource.data.mapDefinition.regionIds
+        && request.resource.data.mapDefinition.regionsById is map
+        && request.resource.data.mapValidation is map
+        && request.resource.data.mapValidation.valid == true;
+    }
+
+    function isMobilizationStart() {
+      return isCurrentWarSchema()
+        && resource.data.phase == 'claim_complete'
+        && request.resource.data.phase == 'mobilization'
+        && resource.data.hostId == request.auth.uid
+        && validAction('mobilization_start')
+        && request.resource.data.turnNumber == resource.data.turnNumber + 1
+        && request.resource.data.turnOrder is list
+        && request.resource.data.turnOrder.size() > 0
+        && request.resource.data.turnOrder.toSet().hasOnly(resource.data.players.keys().toSet())
+        && request.resource.data.mobilizationPending.toSet() == request.resource.data.turnOrder.toSet()
+        && request.resource.data.mobilizationTurnsRemaining == request.resource.data.turnOrder.size()
+        && request.resource.data.claims.size() == resource.data.claims.size()
+        && request.resource.data.winnerId == null
+        && request.resource.data.completedAt == null
+        && roomChangesOnly([
+          'phase', 'players', 'claims', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber',
+          'mobilizationTurnsRemaining', 'mobilizationPending', 'winnerId', 'completedAt', 'lastAction'
+        ]);
+    }
+
+    function isTurnIncome() {
+      let uid = request.auth.uid;
+      let oldPlayer = resource.data.players[uid];
+      let newPlayer = request.resource.data.players[uid];
+      return isCurrentWarSchema()
+        && isCampaignPhase(resource.data.phase)
+        && activeAndEligible()
+        && oldPlayer.lastIncomeTurn < resource.data.turnNumber
+        && validAction('turn_income')
+        && request.resource.data.lastAction.turnNumber == resource.data.turnNumber
+        && roomChangesOnly(['players', 'lastAction'])
+        && request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([uid])
+        && newPlayer.diff(oldPlayer).affectedKeys().hasOnly(['money', 'lastIncomeTurn'])
+        && newPlayer.money == oldPlayer.money + oldPlayer.income
+        && newPlayer.lastIncomeTurn == resource.data.turnNumber;
+    }
+
+    function isLogistics(type) {
+      let uid = request.auth.uid;
+      let regionId = request.resource.data.lastAction.regionId;
+      let count = request.resource.data.lastAction.count;
+      let oldPlayer = resource.data.players[uid];
+      let newPlayer = request.resource.data.players[uid];
+      let oldClaim = resource.data.claims[regionId];
+      let newClaim = request.resource.data.claims[regionId];
+      let region = resource.data.mapDefinition.regionsById[regionId];
+      let unitCost = type == 'recruit_soldiers' ? 10000 : type == 'build_port' ? 30000 : 20000;
+      let expectedCount = type == 'build_port' ? 1 : count;
+      return isCurrentWarSchema()
+        && isCampaignPhase(resource.data.phase)
+        && request.resource.data.phase == resource.data.phase
+        && activeAndEligible()
+        && validAction(type)
+        && request.resource.data.lastAction.turnNumber == resource.data.turnNumber
+        && regionId in resource.data.claims
+        && regionId in resource.data.mapDefinition.regionsById
+        && count is int && count > 0
+        && oldClaim.ownerId == uid
+        && oldClaim.soldiers is int && oldClaim.soldiers >= 0
+        && oldClaim.ships is int && oldClaim.ships >= 0
+        && oldClaim.hasPort is bool
+        && roomChangesOnly(['players', 'claims', 'lastAction'])
+        && request.resource.data.players.diff(resource.data.players).affectedKeys().hasOnly([uid])
+        && request.resource.data.claims.diff(resource.data.claims).affectedKeys().hasOnly([regionId])
+        && newPlayer.diff(oldPlayer).affectedKeys().hasOnly(['money', 'lastIncomeTurn'])
+        && validIncomeStamp(uid)
+        && newPlayer.money == oldPlayer.money + dueIncome(uid) - unitCost * expectedCount
+        && newPlayer.money >= 0
+        && newClaim.ownerId == uid
+        && (type == 'recruit_soldiers'
+          ? newClaim.diff(oldClaim).affectedKeys().hasOnly(['soldiers'])
+            && newClaim.soldiers == oldClaim.soldiers + 1000 * count
+          : type == 'build_port'
+            ? region.coastal == true
+              && oldClaim.hasPort == false
+              && newClaim.diff(oldClaim).affectedKeys().hasOnly(['hasPort'])
+              && newClaim.hasPort == true
+            : region.coastal == true
+              && oldClaim.hasPort == true
+              && newClaim.diff(oldClaim).affectedKeys().hasOnly(['ships'])
+              && newClaim.ships == oldClaim.ships + count);
+    }
+
+    function validOperationBase(type) {
+      return isCurrentWarSchema()
+        && resource.data.phase == 'war'
+        && (request.resource.data.phase == 'war' || request.resource.data.phase == 'finished')
+        && activeAndEligible()
+        && validAction(type)
+        && request.resource.data.lastAction.turnNumber == resource.data.turnNumber
+        && request.resource.data.turnNumber == resource.data.turnNumber + 1
+        && roomChangesOnly([
+          'phase', 'players', 'claims', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber',
+          'mobilizationTurnsRemaining', 'mobilizationPending', 'winnerId', 'completedAt', 'lastAction'
+        ]);
+    }
+
+    function validActorOperationIncome() {
+      let uid = request.auth.uid;
+      return request.resource.data.players[uid].money == resource.data.players[uid].money + dueIncome(uid)
+        && validIncomeStamp(uid);
+    }
+
+    function validNextOperationIncome() {
+      let nextId = request.resource.data.turnOrder[request.resource.data.turnIndex];
+      let oldPlayer = resource.data.players[nextId];
+      let newPlayer = request.resource.data.players[nextId];
+      return request.resource.data.phase == 'finished'
+        || (nextId != request.auth.uid
+          && newPlayer.lastIncomeTurn == request.resource.data.turnNumber
+          && newPlayer.money == oldPlayer.money + newPlayer.income);
+    }
+
+    function validTransferRoute(type, sourceId, targetId, amount) {
+      let sourceRegion = resource.data.mapDefinition.regionsById[sourceId];
+      let targetRegion = resource.data.mapDefinition.regionsById[targetId];
+      let sourceClaim = resource.data.claims[sourceId];
+      let path = request.resource.data.lastAction.path;
+      return type == 'land_transfer'
+        ? path is list
+          && path.size() > 1
+          && path[0] == sourceId
+          && path[path.size() - 1] == targetId
+        : sourceRegion.coastal == true
+          && targetRegion.coastal == true
+          && sourceRegion.seaNeighbors.hasAny([targetId])
+          && targetRegion.seaNeighbors.hasAny([sourceId])
+          && sourceClaim.hasPort == true
+          && sourceClaim.ships * 1000 >= amount;
+    }
+
+    function validAttackRoute(type, sourceId, targetId, amount) {
+      let sourceRegion = resource.data.mapDefinition.regionsById[sourceId];
+      let targetRegion = resource.data.mapDefinition.regionsById[targetId];
+      let sourceClaim = resource.data.claims[sourceId];
+      return type == 'land_attack'
+        ? sourceRegion.landNeighbors.hasAny([targetId])
+        : sourceRegion.coastal == true
+          && targetRegion.coastal == true
+          && sourceRegion.seaNeighbors.hasAny([targetId])
+          && targetRegion.seaNeighbors.hasAny([sourceId])
+          && sourceClaim.hasPort == true
+          && sourceClaim.ships * 1000 >= amount;
+    }
+
+    function validCapturePlayers(uid, targetId, previousOwnerId, captured) {
+      let targetRegion = resource.data.mapDefinition.regionsById[targetId];
+      return captured
+        ? request.resource.data.players[uid].regionIds.toSet()
+            == resource.data.players[uid].regionIds.toSet().union([targetId].toSet())
+          && request.resource.data.players[uid].income == resource.data.players[uid].income + targetRegion.income
+          && (previousOwnerId == null
+            || request.resource.data.players[previousOwnerId].regionIds.toSet()
+              == resource.data.players[previousOwnerId].regionIds.toSet().difference([targetId].toSet())
+            && request.resource.data.players[previousOwnerId].income
+              == resource.data.players[previousOwnerId].income - targetRegion.income
+            && request.resource.data.players[previousOwnerId].eliminated
+              == (resource.data.players[previousOwnerId].regionIds.size() == 1))
+        : request.resource.data.players[uid].regionIds == resource.data.players[uid].regionIds
+          && request.resource.data.players[uid].income == resource.data.players[uid].income;
+    }
+
+    function isTransfer(type) {
+      let uid = request.auth.uid;
+      let sourceId = request.resource.data.lastAction.sourceId;
+      let targetId = request.resource.data.lastAction.targetId;
+      let amount = request.resource.data.lastAction.amount;
+      let oldSource = resource.data.claims[sourceId];
+      let oldTarget = resource.data.claims[targetId];
+      let newSource = request.resource.data.claims[sourceId];
+      let newTarget = request.resource.data.claims[targetId];
+      return validOperationBase(type)
+        && sourceId != targetId
+        && sourceId in resource.data.claims && targetId in resource.data.claims
+        && amount is int && amount > 0 && amount % 1000 == 0
+        && oldSource.ownerId == uid && oldTarget.ownerId == uid
+        && oldSource.soldiers >= amount
+        && request.resource.data.claims.diff(resource.data.claims).affectedKeys().hasOnly([sourceId, targetId])
+        && request.resource.data.players.diff(resource.data.players).affectedKeys()
+          .hasOnly([uid, request.resource.data.turnOrder[request.resource.data.turnIndex]])
+        && newSource.diff(oldSource).affectedKeys().hasOnly(['soldiers'])
+        && newTarget.diff(oldTarget).affectedKeys().hasOnly(['soldiers'])
+        && newSource.soldiers == oldSource.soldiers - amount
+        && newTarget.soldiers == oldTarget.soldiers + amount
+        && validActorOperationIncome()
+        && validNextOperationIncome()
+        && request.resource.data.turnOrder == resource.data.turnOrder
+        && validTurnAdvance()
+        && validTransferRoute(type, sourceId, targetId, amount);
+    }
+
+    function isAttack(type) {
+      let uid = request.auth.uid;
+      let sourceId = request.resource.data.lastAction.sourceId;
+      let targetId = request.resource.data.lastAction.targetId;
+      let amount = request.resource.data.lastAction.amount;
+      let oldSource = resource.data.claims[sourceId];
+      let oldTarget = resource.data.claims[targetId];
+      let newSource = request.resource.data.claims[sourceId];
+      let newTarget = request.resource.data.claims[targetId];
+      let captured = amount > oldTarget.soldiers;
+      let defeated = captured && oldTarget.ownerId != null
+        && resource.data.players[oldTarget.ownerId].regionIds.size() == 1;
+      return validOperationBase(type)
+        && sourceId != targetId
+        && sourceId in resource.data.claims && targetId in resource.data.claims
+        && amount is int && amount > 0 && amount % 1000 == 0
+        && oldSource.ownerId == uid && oldTarget.ownerId != uid
+        && oldSource.soldiers >= amount
+        && request.resource.data.claims.diff(resource.data.claims).affectedKeys().hasOnly([sourceId, targetId])
+        && newSource.diff(oldSource).affectedKeys().hasOnly(['soldiers'])
+        && newSource.soldiers == oldSource.soldiers - amount
+        && newTarget.ownerId == (captured ? uid : oldTarget.ownerId)
+        && newTarget.soldiers == (captured ? amount - oldTarget.soldiers : oldTarget.soldiers - amount)
+        && newTarget.hasPort == oldTarget.hasPort
+        && newTarget.ships == (captured ? 0 : oldTarget.ships)
+        && validActorOperationIncome()
+        && validNextOperationIncome()
+        && (oldTarget.ownerId == null
+          ? request.resource.data.players.diff(resource.data.players).affectedKeys()
+              .hasOnly([uid, request.resource.data.turnOrder[request.resource.data.turnIndex]])
+          : request.resource.data.players.diff(resource.data.players).affectedKeys()
+              .hasOnly([uid, oldTarget.ownerId, request.resource.data.turnOrder[request.resource.data.turnIndex]]))
+        && request.resource.data.lastAction.previousOwnerId == oldTarget.ownerId
+        && request.resource.data.lastAction.success == captured
+        && validCapturePlayers(uid, targetId, oldTarget.ownerId, captured)
+        && (defeated
+          ? !request.resource.data.turnOrder.hasAny([oldTarget.ownerId])
+            && request.resource.data.turnOrder.size() == resource.data.turnOrder.size() - 1
+          : request.resource.data.turnOrder == resource.data.turnOrder)
+        && (request.resource.data.turnOrder.size() == 1
+          ? request.resource.data.phase == 'finished'
+            && request.resource.data.winnerId == uid
+            && request.resource.data.completedAt is timestamp
+          : request.resource.data.phase == 'war'
+            && request.resource.data.winnerId == null)
+        && validAttackRoute(type, sourceId, targetId, amount);
+    }
+
+    function isMobilizationReady() {
+      let uid = request.auth.uid;
+      return isCurrentWarSchema()
+        && resource.data.phase == 'mobilization'
+        && (request.resource.data.phase == 'mobilization' || request.resource.data.phase == 'war' || request.resource.data.phase == 'finished')
+        && activeAndEligible()
+        && resource.data.mobilizationPending.hasAny([uid])
+        && !request.resource.data.mobilizationPending.hasAny([uid])
+        && request.resource.data.mobilizationPending.size() == resource.data.mobilizationPending.size() - 1
+        && request.resource.data.mobilizationTurnsRemaining == resource.data.mobilizationTurnsRemaining - 1
+        && request.resource.data.turnNumber == resource.data.turnNumber + 1
+        && validAction('mobilization_ready')
+        && request.resource.data.lastAction.turnNumber == resource.data.turnNumber
+        && request.resource.data.players[uid].money == resource.data.players[uid].money + dueIncome(uid)
+        && validIncomeStamp(uid)
+        && roomChangesOnly([
+          'phase', 'players', 'claims', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber',
+          'mobilizationTurnsRemaining', 'mobilizationPending', 'winnerId', 'completedAt', 'lastAction'
+        ]);
+    }
+
+    function isWarEnd() {
+      let uid = request.auth.uid;
+      return validOperationBase('end_war_turn')
+        && request.resource.data.phase == 'war'
+        && request.resource.data.claims == resource.data.claims
+        && request.resource.data.turnOrder == resource.data.turnOrder
+        && request.resource.data.players[uid].money == resource.data.players[uid].money + dueIncome(uid)
+        && validIncomeStamp(uid)
+        && roomChangesOnly([
+          'phase', 'players', 'claims', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber',
+          'mobilizationTurnsRemaining', 'mobilizationPending', 'winnerId', 'completedAt', 'lastAction'
+        ]);
+    }
+
+    function isSurrender() {
+      return isCurrentWarSchema()
+        && (resource.data.phase == 'claim_complete' || isCampaignPhase(resource.data.phase))
+        && request.auth.uid in resource.data.players
+        && !(request.auth.uid in request.resource.data.players)
+        && validAction('surrender')
+        && !request.resource.data.turnOrder.hasAny([request.auth.uid])
+        && request.resource.data.players.size() == resource.data.players.size() - 1
+        && request.resource.data.hostId in request.resource.data.players
+        && roomChangesOnly([
+          'phase', 'players', 'claims', 'hostId', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber',
+          'mobilizationTurnsRemaining', 'mobilizationPending', 'winnerId', 'completedAt', 'lastAction'
+        ]);
     }
 
     function isChatUpdate() {
@@ -427,14 +782,16 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll([
           'schemaVersion', 'phase', 'hostId', 'createdAt', 'mapSvg', 'mapDefinition', 'mapValidation',
           'players', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber', 'claims', 'chat', 'lastAction',
-          'joinRequests', 'joinRequestAction'
+          'joinRequests', 'joinRequestAction', 'mobilizationTurnsRemaining', 'mobilizationPending',
+          'winnerId', 'completedAt'
         ])
         && request.resource.data.keys().hasOnly([
           'schemaVersion', 'phase', 'hostId', 'createdAt', 'mapSvg', 'mapDefinition', 'mapValidation',
           'players', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber', 'claims', 'chat', 'lastAction',
-          'joinRequests', 'joinRequestAction'
+          'joinRequests', 'joinRequestAction', 'mobilizationTurnsRemaining', 'mobilizationPending',
+          'winnerId', 'completedAt'
         ])
-        && request.resource.data.schemaVersion == 3
+        && request.resource.data.schemaVersion == 4
         && request.resource.data.phase == 'lobby'
         && request.resource.data.hostId == request.auth.uid
         && request.resource.data.createdAt == request.time
@@ -444,6 +801,7 @@ service cloud.firestore {
         && validPlayer(request.resource.data.players[request.auth.uid], request.auth.uid)
         && request.resource.data.players[request.auth.uid].money == 0
         && request.resource.data.players[request.auth.uid].income == 5000
+        && request.resource.data.players[request.auth.uid].eliminated == false
         && request.resource.data.turnOrder.size() == 0
         && request.resource.data.turnIndex == 0
         && request.resource.data.turnNumber == 0
@@ -452,7 +810,11 @@ service cloud.firestore {
         && request.resource.data.chat.size() == 0
         && request.resource.data.lastAction == null
         && request.resource.data.joinRequests.size() == 0
-        && request.resource.data.joinRequestAction == null;
+        && request.resource.data.joinRequestAction == null
+        && request.resource.data.mobilizationTurnsRemaining == 0
+        && request.resource.data.mobilizationPending.size() == 0
+        && request.resource.data.winnerId == null
+        && request.resource.data.completedAt == null;
 
       allow update: if signedIn() && isValidRoomUpdate();
 

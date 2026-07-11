@@ -3,6 +3,7 @@ import { calculateIncome } from '../game/economy';
 import { PHASES } from '../game/phases';
 import { isJoinRequestExpired, valueMillis } from '../game/joinRequests';
 import { getClaimEligibility, getLegalClaims } from '../game/rules';
+import { createWarPlan, getWarHighlights, selectWarRegion, startWarPlan } from '../game/warUiState';
 import {
   readStoredUnread,
   unreadStorageKey,
@@ -11,13 +12,22 @@ import {
 } from '../game/unreadMessages';
 import {
   claimRegion,
+  attackRegion,
   acceptJoinRequest,
+  buildPort,
+  buyShips,
   clearClosedJoinRequest,
   expireJoinRequest,
   rejectJoinRequest,
+  recruitSoldiers,
   saveIncome,
   sendChatMessage,
   skipOfflineTurn,
+  endWarTurn,
+  finishMobilizationTurn,
+  grantCurrentTurnIncome,
+  startMobilization,
+  transferTroops,
   voteJoinRequest,
 } from '../services/roomService';
 import { ClaimCompletePanel } from './ClaimCompletePanel';
@@ -25,6 +35,7 @@ import { MapViewer } from './MapViewer';
 import { MobileGameRoom } from './MobileGameRoom';
 import { LeftPanel } from './SidePanels/LeftPanel';
 import { RightPanel } from './SidePanels/RightPanel';
+import { VictoryPanel } from './VictoryPanel';
 
 export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
   const [selectedId, setSelectedId] = useState(null);
@@ -35,19 +46,28 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
   const [mobileChatVisible, setMobileChatVisible] = useState(false);
   const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== 'hidden');
   const [unreadCount, setUnreadCount] = useState(0);
+  const [warPlan, setWarPlan] = useState(createWarPlan);
   const [compactViewport, setCompactViewport] = useState(() => (
     typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches
   ));
   const chatEndRef = useRef(null);
   const expiringRequests = useRef(new Set());
   const unreadStateRef = useRef(null);
+  const incomeRequestRef = useRef(null);
   const latestChatRef = useRef(roomData.chat || []);
   latestChatRef.current = roomData.chat || [];
 
   const me = roomData.players?.[user.uid];
   const currentPlayerId = roomData.turnOrder?.[roomData.turnIndex] || null;
   const currentPlayer = roomData.players?.[currentPlayerId];
-  const isMyTurn = roomData.phase === PHASES.CLAIMING && currentPlayerId === user.uid;
+  const warContextKey = `${roomData.phase}:${roomData.turnNumber}:${roomData.mapDefinition?.importedAt || 0}:${roomData.lastAction?.actionId || ''}`;
+  const activeWarPlan = useMemo(() => (
+    warPlan.contextKey === warContextKey
+      ? warPlan
+      : { ...createWarPlan(), contextKey: warContextKey }
+  ), [warContextKey, warPlan]);
+  const isMyTurn = [PHASES.CLAIMING, PHASES.MOBILIZATION, PHASES.WAR].includes(roomData.phase)
+    && currentPlayerId === user.uid && !me?.eliminated;
   const isHost = roomData.hostId === user.uid;
   const regionsById = useMemo(() => roomData.mapDefinition?.regionsById || {}, [roomData.mapDefinition]);
   const selectedRegion = selectedId ? regionsById[selectedId] : null;
@@ -60,8 +80,11 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     .sort((a, b) => (a.createdAt?.toMillis?.() || 0) - (b.createdAt?.toMillis?.() || 0)), [now, roomData.joinRequests]);
 
   const legalClaims = useMemo(() => (
-    isMyTurn ? getLegalClaims(roomData.mapDefinition, roomData.claims, user.uid) : []
-  ), [isMyTurn, roomData.claims, roomData.mapDefinition, user.uid]);
+    isMyTurn && roomData.phase === PHASES.CLAIMING ? getLegalClaims(roomData.mapDefinition, roomData.claims, user.uid) : []
+  ), [isMyTurn, roomData.claims, roomData.mapDefinition, roomData.phase, user.uid]);
+  const warHighlights = useMemo(() => (
+    roomData.phase === PHASES.WAR ? getWarHighlights(roomData, user.uid, activeWarPlan) : { sources: [], targets: [] }
+  ), [activeWarPlan, roomData, user.uid]);
   const unreadKey = useMemo(() => unreadStorageKey(roomCode, user.uid), [roomCode, user.uid]);
   const chatVisible = pageVisible && (compactViewport ? mobileChatVisible : true);
 
@@ -117,6 +140,18 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
   }, [regionsById, selectedId]);
 
   useEffect(() => {
+    if (![PHASES.MOBILIZATION, PHASES.WAR].includes(roomData.phase)
+      || !isMyTurn
+      || (me?.lastIncomeTurn || 0) >= roomData.turnNumber) return;
+    const key = `${roomCode}:${roomData.turnNumber}:${user.uid}`;
+    if (incomeRequestRef.current === key) return;
+    incomeRequestRef.current = key;
+    grantCurrentTurnIncome(roomCode, user.uid, roomData.turnNumber).catch(() => {
+      if (incomeRequestRef.current === key) incomeRequestRef.current = null;
+    });
+  }, [isMyTurn, me?.lastIncomeTurn, roomCode, roomData.phase, roomData.turnNumber, user.uid]);
+
+  useEffect(() => {
     Object.values(roomData.joinRequests || {}).forEach((request) => {
       if (request.status !== 'pending' || !isJoinRequestExpired(request, now) || expiringRequests.current.has(request.uid)) return;
       expiringRequests.current.add(request.uid);
@@ -161,6 +196,40 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
   );
   const finishTurn = () => runAction(() => saveIncome(roomCode, user.uid, roomData.turnNumber));
   const skipPlayer = () => runAction(() => skipOfflineTurn(roomCode, user.uid));
+  const beginWarPlan = (operation, routeType) => {
+    setActionError('');
+    setWarPlan({ ...startWarPlan(operation, routeType), contextKey: warContextKey });
+  };
+  const cancelWarPlan = () => setWarPlan({ ...createWarPlan(), contextKey: warContextKey });
+  const selectMapRegion = (regionId) => {
+    if (roomData.phase === PHASES.WAR) {
+      setWarPlan((currentPlan) => {
+        const current = currentPlan.contextKey === warContextKey
+          ? currentPlan
+          : { ...createWarPlan(), contextKey: warContextKey };
+        if (current.mode === 'idle') {
+          setSelectedId(regionId);
+          return current;
+        }
+        const next = selectWarRegion(roomData, user.uid, current, regionId);
+        if (next !== current) setSelectedId(regionId);
+        return { ...next, contextKey: warContextKey };
+      });
+      return;
+    }
+    setSelectedId(regionId);
+  };
+  const recruitSelected = () => runAction(() => recruitSoldiers(roomCode, user.uid, selectedId, 1, roomData.turnNumber));
+  const buildSelectedPort = () => runAction(() => buildPort(roomCode, user.uid, selectedId, roomData.turnNumber));
+  const buySelectedShip = () => runAction(() => buyShips(roomCode, user.uid, selectedId, 1, roomData.turnNumber));
+  const readyMobilization = () => runAction(() => finishMobilizationTurn(roomCode, user.uid, roomData.turnNumber), { clearSelection: true });
+  const finishWarTurn = () => runAction(() => endWarTurn(roomCode, user.uid, roomData.turnNumber), { clearSelection: true });
+  const executeWarOperation = () => runAction(() => (
+    activeWarPlan.operation === 'attack'
+      ? attackRegion(roomCode, user.uid, activeWarPlan.routeType, activeWarPlan.sourceId, activeWarPlan.targetId, activeWarPlan.amount, roomData.turnNumber)
+      : transferTroops(roomCode, user.uid, activeWarPlan.routeType, activeWarPlan.sourceId, activeWarPlan.targetId, activeWarPlan.amount, roomData.turnNumber)
+  ), { clearSelection: true });
+  const launchMobilization = () => runAction(() => startMobilization(roomCode, user.uid));
   const submitMessage = async (event) => {
     event.preventDefault();
     const sent = await runAction(() => sendChatMessage(roomCode, user.uid, message));
@@ -189,6 +258,7 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     selectedId,
     selectedRegion,
     selectedOwner,
+    selectedClaim,
     eligibility,
     actionError,
     actionPending,
@@ -205,17 +275,36 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     rejectRequest,
     resetApp,
     unreadCount,
+    warPlan: activeWarPlan,
+    setWarPlan,
+    beginWarPlan,
+    cancelWarPlan,
+    recruitSelected,
+    buildSelectedPort,
+    buySelectedShip,
+    readyMobilization,
+    finishWarTurn,
+    executeWarOperation,
+    warHighlights,
   };
 
   if (roomData.phase === PHASES.CLAIM_COMPLETE) {
-    return <ClaimCompletePanel roomData={roomData} roomCode={roomCode} leaveRoom={leaveRoom} />;
+    return <ClaimCompletePanel roomData={roomData} roomCode={roomCode} leaveRoom={leaveRoom} isHost={isHost} onStart={launchMobilization} actionPending={actionPending} actionError={actionError} />;
+  }
+
+  if (roomData.phase === PHASES.FINISHED) {
+    return <VictoryPanel roomData={roomData} roomCode={roomCode} leaveRoom={leaveRoom} message={message} setMessage={setMessage} submitMessage={submitMessage} chatEndRef={chatEndRef} />;
+  }
+
+  if ([PHASES.MOBILIZATION, PHASES.WAR].includes(roomData.phase) && roomData.schemaVersion !== 4) {
+    return <main className="aop-complete-screen aop-desk"><section className="aop-complete-sheet"><div className="aop-label">Uyumsuz Oda</div><h1 className="aop-title">Savaş kaydı tamamlanmamış</h1><p className="aop-complete-copy">Bu eski oda güncel askerî şemayı taşımıyor. Güvenli olmayan alanlar varsayılmadı; yeni bir oda oluştur.</p><button className="aop-button-secondary px-4" onClick={leaveRoom}>Odadan Ayrıl</button></section></main>;
   }
 
   if (compactViewport) {
     return (
       <MobileGameRoom
         {...shared}
-        setSelectedId={setSelectedId}
+        setSelectedId={selectMapRegion}
         legalClaims={legalClaims}
         leaveRoom={leaveRoom}
         onChatVisibilityChange={setMobileChatVisible}
@@ -230,11 +319,14 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
         roomData={roomData}
         roomCode={roomCode}
         selectedId={selectedId}
-        setSelectedId={setSelectedId}
+        setSelectedId={selectMapRegion}
         legalClaims={legalClaims}
         currentPlayer={currentPlayer}
         leaveRoom={leaveRoom}
         localPlayerId={user.uid}
+        highlightSourceIds={warHighlights.sources}
+        highlightTargetIds={warHighlights.targets}
+        showNavalRoutes={roomData.phase === PHASES.WAR && activeWarPlan.routeType === 'naval' && activeWarPlan.mode !== 'idle'}
       />
       <RightPanel {...shared} />
     </div>

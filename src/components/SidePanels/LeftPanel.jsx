@@ -22,6 +22,10 @@ export const LeftPanel = ({
   const activeRowRef = useRef(null);
   const activeLastSeen = lastActiveMillis(roomData.players?.[currentPlayerId]?.lastActive);
   const maySkip = isHost && currentPlayerId && now - activeLastSeen >= OFFLINE_SKIP_TIMEOUT;
+  const displayOrder = [
+    ...(roomData.turnOrder || []),
+    ...Object.keys(roomData.players || {}).filter((id) => !roomData.turnOrder?.includes(id)),
+  ];
   useEffect(() => {
     activeRowRef.current?.scrollIntoView({ block: 'nearest' });
   }, [currentPlayerId]);
@@ -31,7 +35,7 @@ export const LeftPanel = ({
         <div className="aop-label">Tur Defteri</div>
         <h2 className="aop-title text-2xl mb-4">Komutanlar</h2>
         <div className="space-y-2">
-          {roomData.turnOrder.map((playerId) => {
+          {displayOrder.map((playerId) => {
             const player = roomData.players[playerId];
             if (!player) return null;
             const active = playerId === currentPlayerId;
@@ -39,7 +43,7 @@ export const LeftPanel = ({
             return (
               <div ref={active ? activeRowRef : null} key={playerId} className={`aop-player-row ${active ? 'is-active' : ''} ${offline ? 'is-offline' : ''}`}>
                 <span className="aop-player-seal" style={{ backgroundColor: player.color }}>{player.name[0]}</span>
-                <span className="min-w-0 flex-1"><strong>{player.name}</strong><small>{(player.money || 0).toLocaleString('tr-TR')} altın</small></span>
+                <span className="min-w-0 flex-1"><strong>{player.name}</strong><small>{player.eliminated ? 'Elendi, seyirci' : `${(player.money || 0).toLocaleString('tr-TR')} altın`}</small></span>
                 {active && <b>SIRA</b>}
                 {offline ? <Icon p={Icons.WifiOff} s={15}/> : null}
               </div>

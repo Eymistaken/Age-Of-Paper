@@ -9,6 +9,8 @@ import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
 import { MapViewer } from './MapViewer';
 import { JoinRequestCards } from './JoinRequestCards';
+import { PHASES } from '../game/phases';
+import { WarCommandPanel } from './WarCommandPanel';
 
 function lastActiveMillis(value) {
   if (typeof value?.toMillis === 'function') return value.toMillis();
@@ -48,6 +50,18 @@ export const MobileGameRoom = ({
   rejectRequest,
   unreadCount,
   onChatVisibilityChange,
+  selectedClaim,
+  warPlan,
+  setWarPlan,
+  beginWarPlan,
+  cancelWarPlan,
+  recruitSelected,
+  buildSelectedPort,
+  buySelectedShip,
+  readyMobilization,
+  finishWarTurn,
+  executeWarOperation,
+  warHighlights,
 }) => {
   const [activeTab, setActiveTab] = useState('orders');
   const [snapName, setSnapName] = useState('compact');
@@ -223,9 +237,9 @@ export const MobileGameRoom = ({
     <div ref={gameRef} className="aop-mobile-game aop-desk">
       <header ref={hudRef} className="aop-mobile-hud">
         <div><small>Hazine</small><strong>{(me.money || 0).toLocaleString('tr-TR')}</strong></div>
-        <div><small>Biriktirme getirisi</small><strong>+{currentIncome.toLocaleString('tr-TR')}</strong></div>
+        <div><small>Tur Geliri</small><strong>+{currentIncome.toLocaleString('tr-TR')}</strong></div>
         <div className="is-active-player"><small>Aktif</small><strong>{currentPlayer?.name || 'Bekleniyor'}</strong></div>
-        <div><small>Round</small><strong>{roomData.roundNumber || 1}</strong></div>
+        <div><small>Evre</small><strong>{roomData.phase === PHASES.MOBILIZATION ? 'Seferberlik' : roomData.phase === PHASES.WAR ? 'Savaş' : 'Edinme'}</strong></div>
         <div className="aop-mobile-room"><small>Oda</small><strong>{roomCode}</strong><CopyBtn code={roomCode}/></div>
         <button onClick={leaveRoom} className="aop-mobile-icon-btn" aria-label="Odadan ayrıl"><Icon p={Icons.LogOut}/></button>
       </header>
@@ -241,6 +255,9 @@ export const MobileGameRoom = ({
         localPlayerId={me.id}
         hideHud
         className="aop-mobile-map"
+        highlightSourceIds={warHighlights?.sources || []}
+        highlightTargetIds={warHighlights?.targets || []}
+        showNavalRoutes={roomData.phase === PHASES.WAR && warPlan?.routeType === 'naval' && warPlan?.mode !== 'idle'}
       />
 
       <section ref={sheetRef} className={`aop-mobile-sheet is-${snapName}`} data-snap={snapName}>
@@ -255,7 +272,7 @@ export const MobileGameRoom = ({
         ><span/></button>
         <nav className="aop-mobile-tabs" aria-label="Oyun panelleri">
           {[
-            ['orders', 'Toprak', Icons.Map],
+            ['orders', roomData.phase === PHASES.CLAIMING ? 'Toprak' : 'Emir', Icons.Map],
             ['players', 'Sıra', Icons.User],
             ['chat', 'Mesaj', Icons.Send],
             ['requests', `İstek ${requestCount ? `(${requestCount})` : ''}`, Icons.User],
@@ -274,7 +291,16 @@ export const MobileGameRoom = ({
         <span className="aop-sr-only" aria-live="polite">{unreadCount ? `${unreadCount} okunmamış mesaj` : ''}</span>
         <div ref={sheetBodyRef} className="aop-mobile-sheet-body custom-scrollbar">
           {activeTab === 'orders' && (
-            <div className="aop-mobile-order-card">
+            [PHASES.MOBILIZATION, PHASES.WAR].includes(roomData.phase) ? (
+              <WarCommandPanel
+                compact roomData={roomData} me={me} currentPlayer={currentPlayer} isMyTurn={isMyTurn}
+                selectedRegion={selectedRegion} selectedClaim={selectedClaim} selectedOwner={selectedOwner}
+                plan={warPlan} setPlan={setWarPlan} beginPlan={beginWarPlan} cancelPlan={cancelWarPlan}
+                actionPending={actionPending} actionError={actionError} onRecruit={recruitSelected}
+                onBuildPort={buildSelectedPort} onBuyShips={buySelectedShip} onReady={readyMobilization}
+                onExecuteOperation={executeWarOperation} onEndTurn={finishWarTurn}
+              />
+            ) : <div className="aop-mobile-order-card">
               <div>
                 <div className="aop-label">{isMyTurn ? 'Hamle Sırası Sende' : `Sıra ${currentPlayer?.name || 'bekleniyor'}`}</div>
                 <h2 className="aop-title text-2xl">{selectedRegion?.name || 'Bölge seç'}</h2>
@@ -303,7 +329,7 @@ export const MobileGameRoom = ({
 
           {activeTab === 'players' && (
             <div className="space-y-2">
-              {roomData.turnOrder.map((playerId) => {
+              {[...(roomData.turnOrder || []), ...Object.keys(roomData.players || {}).filter((id) => !roomData.turnOrder?.includes(id))].map((playerId) => {
                 const player = roomData.players[playerId];
                 if (!player) return null;
                 const active = playerId === currentPlayerId;
@@ -311,7 +337,7 @@ export const MobileGameRoom = ({
                 return (
                   <div ref={active ? activePlayerRef : null} key={playerId} className={`aop-mobile-player ${active ? 'is-active' : ''} ${offline ? 'is-offline' : ''}`}>
                     <span className="aop-player-seal" style={{ backgroundColor: player.color }}>{player.name[0]}</span>
-                    <span className="min-w-0 flex-1"><strong>{player.name}</strong><small>{(player.money || 0).toLocaleString('tr-TR')} altın</small></span>
+                    <span className="min-w-0 flex-1"><strong>{player.name}</strong><small>{player.eliminated ? 'Elendi, seyirci' : `${(player.money || 0).toLocaleString('tr-TR')} altın`}</small></span>
                     {active && <b>SIRA</b>}
                     {offline ? <Icon p={Icons.WifiOff} s={15}/> : null}
                   </div>

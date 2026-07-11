@@ -4,16 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MapViewer } from './MapViewer';
 
 const regions = {
-  california: {
-    id: 'california', name: 'California', price: 5000, income: 500,
+  a: {
+    id: 'a', name: 'A', price: 5000, income: 500,
     claimNeighbors: [], bounds: { x: 80, y: 180, width: 100, height: 80 },
   },
-  texas: {
-    id: 'texas', name: 'Texas', price: 5000, income: 500,
+  b: {
+    id: 'b', name: 'B', price: 5000, income: 500,
     claimNeighbors: [], bounds: { x: 680, y: 220, width: 80, height: 70 },
   },
 };
-const mapSvg = '<svg viewBox="0 0 1000 500"><rect data-region="true" data-region-id="california" id="california" x="80" y="180" width="100" height="80"/><rect data-region="true" data-region-id="texas" id="texas" x="680" y="220" width="80" height="70"/></svg>';
+const mapSvg = '<svg viewBox="0 0 1000 500"><rect data-region="true" data-region-id="a" id="a" x="80" y="180" width="100" height="80"/><rect data-region="true" data-region-id="b" id="b" x="680" y="220" width="80" height="70"/></svg>';
 
 class Matrix {
   constructor(a = 1, b = 0, c = 0, d = 1, e = 0, f = 0) {
@@ -65,7 +65,7 @@ function room(overrides = {}) {
     mapSvg,
     mapDefinition: {
       viewBox: { x: 0, y: 0, width: 1000, height: 500 },
-      regionIds: ['california', 'texas'],
+      regionIds: ['a', 'b'],
       regionsById: regions,
     },
     claims: {},
@@ -196,11 +196,11 @@ describe('MapViewer remote claim focus', () => {
         boundsSpace: 'viewBox',
         regionsById: {
           ...regions,
-          texas: { ...regions.texas, bounds: { x: 10, y: 10, width: 30, height: 30 } },
+          b: { ...regions.b, bounds: { x: 10, y: 10, width: 30, height: 30 } },
         },
       },
-      claims: { texas: { ownerId: 'other' } },
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'texas', actionId: '4:claim:other:texas', turnNumber: 4 },
+      claims: { b: { ownerId: 'other' } },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'b', actionId: '4:claim:other:b', turnNumber: 4 },
     }));
     await advance(500);
     const focused = cameraFromTransform({ x: 0, y: 0, width: 800, height: 600 });
@@ -209,25 +209,25 @@ describe('MapViewer remote claim focus', () => {
   });
 
   it('uses transformed root-viewBox bounds for the exact claimed region', async () => {
-    const transformedSvg = '<svg viewBox="100 50 1000 500"><rect data-region="true" data-region-id="california" x="120" y="180" width="100" height="80"/><g transform="translate(600 100) scale(2)"><rect data-region="true" data-region-id="texas" x="10" y="20" width="40" height="30"/></g></svg>';
+    const transformedSvg = '<svg viewBox="100 50 1000 500"><rect data-region="true" data-region-id="a" x="120" y="180" width="100" height="80"/><g transform="translate(600 100) scale(2)"><rect data-region="true" data-region-id="b" x="10" y="20" width="40" height="30"/></g></svg>';
     const transformedRoom = room({
       mapSvg: transformedSvg,
       mapDefinition: {
         viewBox: { x: 100, y: 50, width: 1000, height: 500 },
-        regionIds: ['california', 'texas'],
-        regionsById: { california: regions.california, texas: { ...regions.texas, bounds: null } },
+        regionIds: ['a', 'b'],
+        regionsById: { a: regions.a, b: { ...regions.b, bounds: null } },
       },
     });
     const map = await renderRoom(transformedRoom, {
-      geometry: { matrices: { texas: new Matrix(2, 0, 0, 2, 600, 100) } },
+      geometry: { matrices: { b: new Matrix(2, 0, 0, 2, 600, 100) } },
     });
     await makeUserCamera(map);
     await renderRoom({
       ...transformedRoom,
-      claims: { texas: { ownerId: 'other' } },
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'texas', actionId: '4:claim:other:texas', turnNumber: 4 },
+      claims: { b: { ownerId: 'other' } },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'b', actionId: '4:claim:other:b', turnNumber: 4 },
     }, {
-      geometry: { matrices: { texas: new Matrix(2, 0, 0, 2, 600, 100) } },
+      geometry: { matrices: { b: new Matrix(2, 0, 0, 2, 600, 100) } },
     });
     await advance(500);
     const focused = cameraFromTransform({ x: 0, y: 0, width: 800, height: 600 });
@@ -235,12 +235,37 @@ describe('MapViewer remote claim focus', () => {
     expect(focused.focusY).toBeCloseTo(170, 5);
   });
 
+  it('uses the same strict transformed target bounds for a remote attack', async () => {
+    const transformedSvg = '<svg viewBox="100 50 1000 500"><rect data-region="true" data-region-id="a" x="120" y="180" width="100" height="80"/><g transform="translate(600 100) scale(2)"><rect data-region="true" data-region-id="b" x="10" y="20" width="40" height="30"/></g></svg>';
+    const transformedRoom = room({
+      mapSvg: transformedSvg,
+      mapDefinition: {
+        viewBox: { x: 100, y: 50, width: 1000, height: 500 },
+        regionIds: ['a', 'b'],
+        regionsById: { a: regions.a, b: { ...regions.b, bounds: null } },
+      },
+    });
+    const geometry = { matrices: { b: new Matrix(2, 0, 0, 2, 600, 100) } };
+    const map = await renderRoom(transformedRoom, { geometry });
+    const baseTransform = await makeUserCamera(map);
+    await renderRoom({
+      ...transformedRoom,
+      lastAction: { type: 'land_attack', actorId: 'other', sourceId: 'a', targetId: 'b', amount: 1000, actionId: '4:land_attack:other:b', turnNumber: 4 },
+    }, { geometry });
+    await advance(500);
+    const focused = cameraFromTransform({ x: 0, y: 0, width: 800, height: 600 });
+    expect(focused.focusX).toBeCloseTo(660, 5);
+    expect(focused.focusY).toBeCloseTo(170, 5);
+    await advance(1400);
+    expect(container.querySelector('.aop-map-transform').style.transform).toBe(baseTransform);
+  });
+
   it('skips invalid legacy bounds instead of focusing the map default', async () => {
     const map = await renderRoom(room());
     const baseTransform = await makeUserCamera(map);
     await renderRoom(room({
-      claims: { texas: { ownerId: 'other' } },
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'texas', actionId: '4:claim:other:texas', turnNumber: 4 },
+      claims: { b: { ownerId: 'other' } },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'b', actionId: '4:claim:other:b', turnNumber: 4 },
     }), { geometry: { unavailable: true } });
     await advance(2000);
     expect(container.querySelector('.aop-map-transform').style.transform).toBe(baseTransform);
@@ -250,8 +275,8 @@ describe('MapViewer remote claim focus', () => {
     const map = await renderRoom(room());
     await makeUserCamera(map);
     await renderRoom(room({
-      claims: { texas: { ownerId: 'other' } },
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'texas', actionId: '4:claim:other:texas', turnNumber: 4 },
+      claims: { b: { ownerId: 'other' } },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'b', actionId: '4:claim:other:b', turnNumber: 4 },
     }), { geometry: { unavailable: true } });
     mockSvgGeometry();
     await advance(500);
@@ -265,8 +290,8 @@ describe('MapViewer remote claim focus', () => {
     const map = await renderRoom(room(), { visibleRect: mobileRect });
     await makeUserCamera(map);
     await renderRoom(room({
-      claims: { texas: { ownerId: 'other' } },
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'texas', actionId: '4:claim:other:texas', turnNumber: 4 },
+      claims: { b: { ownerId: 'other' } },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'b', actionId: '4:claim:other:b', turnNumber: 4 },
     }), { visibleRect: mobileRect });
     await advance(500);
     const focused = cameraFromTransform(mobileRect);
@@ -281,8 +306,8 @@ describe('MapViewer remote claim focus', () => {
     await renderRoom(room({
       turnIndex: 0,
       turnNumber: 5,
-      claims: { texas: { ownerId: 'other' } },
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'texas', actionId: '4:claim:other:texas', turnNumber: 4 },
+      claims: { b: { ownerId: 'other' } },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'b', actionId: '4:claim:other:b', turnNumber: 4 },
     }));
     await advance(500);
     expect(container.querySelector('.aop-map-transform').style.transform).not.toBe(baseTransform);
@@ -300,7 +325,7 @@ describe('MapViewer remote claim focus', () => {
       lastAction: { type: 'save_income', actorId: 'other', actionId: '4:save:other', turnNumber: 4 },
     }));
     await renderRoom(room({
-      lastAction: { type: 'claim', actorId: 'me', regionId: 'texas', actionId: '5:claim:me:texas', turnNumber: 5 },
+      lastAction: { type: 'claim', actorId: 'me', regionId: 'b', actionId: '5:claim:me:b', turnNumber: 5 },
     }));
     await advance(2000);
     expect(container.querySelector('.aop-map-transform').style.transform).toBe(baseTransform);
@@ -310,8 +335,8 @@ describe('MapViewer remote claim focus', () => {
     const map = await renderRoom(room());
     await makeUserCamera(map);
     await renderRoom(room({
-      claims: { texas: { ownerId: 'other' } },
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'texas', actionId: '4:claim:other:texas', turnNumber: 4 },
+      claims: { b: { ownerId: 'other' } },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'b', actionId: '4:claim:other:b', turnNumber: 4 },
     }));
     await advance(200);
     await act(async () => map.dispatchEvent(new WheelEvent('wheel', {
@@ -326,8 +351,8 @@ describe('MapViewer remote claim focus', () => {
     const map = await renderRoom(room());
     await makeUserCamera(map);
     await renderRoom(room({
-      claims: { texas: { ownerId: 'other' } },
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'texas', actionId: '4:claim:other:texas', turnNumber: 4 },
+      claims: { b: { ownerId: 'other' } },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'b', actionId: '4:claim:other:b', turnNumber: 4 },
     }));
     await advance(160);
     const beforePress = container.querySelector('.aop-map-transform').style.transform;
@@ -343,8 +368,8 @@ describe('MapViewer remote claim focus', () => {
     expect(container.querySelector('.aop-map-transform').style.transform).toBe(pannedTransform);
 
     await renderRoom(room({
-      claims: { california: { ownerId: 'other' } },
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'california', actionId: '5:claim:other:california', turnNumber: 5 },
+      claims: { a: { ownerId: 'other' } },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'a', actionId: '5:claim:other:a', turnNumber: 5 },
     }));
     await advance(160);
     await act(async () => {
@@ -363,8 +388,8 @@ describe('MapViewer remote claim focus', () => {
     const map = await renderRoom(room());
     await makeUserCamera(map);
     await renderRoom(room({
-      claims: { texas: { ownerId: 'other' } },
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'texas', actionId: '4:claim:other:texas', turnNumber: 4 },
+      claims: { b: { ownerId: 'other' } },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'b', actionId: '4:claim:other:b', turnNumber: 4 },
     }));
     await advance(180);
     await act(async () => container.querySelector('[aria-label="Yakınlaştır"]').click());
@@ -373,8 +398,8 @@ describe('MapViewer remote claim focus', () => {
     expect(container.querySelector('.aop-map-transform').style.transform).toBe(zoomedTransform);
 
     await renderRoom(room({
-      claims: { california: { ownerId: 'other' } },
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'california', actionId: '5:claim:other:california', turnNumber: 5 },
+      claims: { a: { ownerId: 'other' } },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'a', actionId: '5:claim:other:a', turnNumber: 5 },
     }));
     await advance(180);
     await act(async () => container.querySelector('[aria-label="Haritayı sığdır"]').click());
@@ -396,13 +421,13 @@ describe('MapViewer remote claim focus', () => {
     const map = await renderRoom(room());
     const baseTransform = await makeUserCamera(map);
     await renderRoom(room({
-      claims: { texas: { ownerId: 'other' } },
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'texas', actionId: '4:claim:other:texas', turnNumber: 4 },
+      claims: { b: { ownerId: 'other' } },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'b', actionId: '4:claim:other:b', turnNumber: 4 },
     }));
     await advance(500);
     await renderRoom(room({
-      claims: { california: { ownerId: 'other' }, texas: { ownerId: 'other' } },
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'california', actionId: '5:claim:other:california', turnNumber: 5 },
+      claims: { a: { ownerId: 'other' }, b: { ownerId: 'other' } },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'a', actionId: '5:claim:other:a', turnNumber: 5 },
     }));
     await advance(1800);
     expect(container.querySelector('.aop-map-transform').style.transform).toBe(baseTransform);
@@ -414,7 +439,7 @@ describe('MapViewer remote claim focus', () => {
       addEventListener: vi.fn(), removeEventListener: vi.fn(),
     }));
     const map = await renderRoom(room({
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'texas', actionId: 'old-claim', turnNumber: 3 },
+      lastAction: { type: 'claim', actorId: 'other', regionId: 'b', actionId: 'old-claim', turnNumber: 3 },
     }));
     const transform = await makeUserCamera(map);
     await advance(1000);

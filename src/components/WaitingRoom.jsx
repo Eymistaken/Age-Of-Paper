@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { MAX_PLAYERS } from '../constants';
 import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
+import { NavalRouteEditor } from './NavalRouteEditor';
 
 function ValidationSummary({ validation }) {
   if (!validation?.regionCount) {
@@ -51,6 +52,7 @@ export const WaitingRoom = ({
   handleMapUpload,
   handleMapFile,
   startGame,
+  editNavalMap,
   leaveRoom,
   resetApp,
   loading,
@@ -195,6 +197,9 @@ export const WaitingRoom = ({
           )}
         </aside>
       </div>
+      {isHost && roomData.mapValidation?.valid && roomData.mapSvg && (
+        <NavalRouteEditor roomData={roomData} roomCode={roomCode} onEdit={editNavalMap} loading={loading} />
+      )}
     </main>
   </div>
   );

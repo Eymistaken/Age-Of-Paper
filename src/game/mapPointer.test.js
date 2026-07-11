@@ -13,7 +13,7 @@ const pointer = (overrides = {}) => ({
   button: 0,
   x: 100,
   y: 100,
-  regionId: 'california',
+  regionId: 'a',
   ...overrides,
 });
 
@@ -26,7 +26,7 @@ describe('map pointer state machine', () => {
     expect(result.state.mode).toBe(POINTER_MODES.PRESS_PENDING);
     expect(result.startedPan).toBe(false);
     result = endMapPointer(result.state, 1);
-    expect(result.selectionRegionId).toBe('california');
+    expect(result.selectionRegionId).toBe('a');
     expect(result.state.mode).toBe(POINTER_MODES.IDLE);
   });
 
