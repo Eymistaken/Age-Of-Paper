@@ -1,42 +1,44 @@
 import { describe, expect, it } from 'vitest';
-import { createFocusState, reduceFocusSnapshot } from './cameraFocus';
+import { createFocusState, reduceFocusAction } from './cameraFocus';
 
-const room = (overrides = {}) => ({
-  turnOrder: ['me', 'other'], turnIndex: 1, turnNumber: 4, lastAction: null, ...overrides,
+const action = (overrides = {}) => ({
+  type: 'claim',
+  actorId: 'other',
+  regionId: 'texas',
+  turnNumber: 4,
+  actionId: '4:claim:other:texas',
+  ...overrides,
 });
 
 describe('camera focus event selection', () => {
-  it('focuses a newly-started local turn then restores after the local action', () => {
-    let state = createFocusState(room());
-    let result = reduceFocusSnapshot(state, room({ turnIndex: 0, turnNumber: 5 }), 'me');
-    expect(result.effect).toEqual({ type: 'local_turn' });
+  it('emits each new remote claim exactly once', () => {
+    let state = createFocusState(null);
+    let result = reduceFocusAction(state, action(), 'me');
+    expect(result.effect).toEqual({ type: 'remote_claim', actionId: action().actionId, regionId: 'texas' });
     state = result.state;
-    result = reduceFocusSnapshot(state, room({
-      turnIndex: 1,
-      turnNumber: 6,
-      lastAction: { type: 'save_income', actorId: 'me', turnNumber: 5, actionId: '5:save_income:me' },
-    }), 'me');
-    expect(result.effect).toEqual({ type: 'local_restore' });
-  });
-
-  it('emits a remote completed action once and ignores heartbeat/chat snapshots', () => {
-    let state = createFocusState(room());
-    const acted = room({
-      turnIndex: 0,
-      turnNumber: 5,
-      lastAction: { type: 'claim', actorId: 'other', regionId: 'r2', turnNumber: 4, actionId: '4:claim:other:r2' },
-    });
-    let result = reduceFocusSnapshot(state, acted, 'me');
-    expect(result.effect).toMatchObject({ type: 'remote_action', actionType: 'claim', regionId: 'r2' });
-    expect(result.effect.localTurnStarted).toBe(true);
-    state = result.state;
-    result = reduceFocusSnapshot(state, { ...acted, chat: [{ id: 'm1' }] }, 'me');
+    result = reduceFocusAction(state, action(), 'me');
     expect(result.effect).toBeNull();
   });
 
-  it('marks automation cancelled after manual interaction', () => {
-    const state = createFocusState(room(), { automationCancelled: true });
-    const result = reduceFocusSnapshot(state, room({ turnIndex: 0, turnNumber: 5 }), 'me');
+  it('ignores remote save-income, local claims, and turn-only snapshots', () => {
+    let state = createFocusState(null);
+    let result = reduceFocusAction(state, action({ type: 'save_income', regionId: undefined, actionId: '4:save:other' }), 'me');
     expect(result.effect).toBeNull();
+    state = result.state;
+    result = reduceFocusAction(state, action({ actorId: 'me', actionId: '5:claim:me:texas' }), 'me');
+    expect(result.effect).toBeNull();
+    expect(reduceFocusAction(result.state, null, 'me').effect).toBeNull();
+  });
+
+  it('does not replay an action already present when the component mounts', () => {
+    const oldAction = action();
+    const state = createFocusState(oldAction);
+    expect(reduceFocusAction(state, oldAction, 'me').effect).toBeNull();
+  });
+
+  it('ignores heartbeat and presence snapshots that keep the same action ID', () => {
+    const first = reduceFocusAction(createFocusState(null), action(), 'me');
+    const heartbeat = { ...action(), at: 12345 };
+    expect(reduceFocusAction(first.state, heartbeat, 'me').effect).toBeNull();
   });
 });

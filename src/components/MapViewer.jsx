@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
 } from 'react';
+import { createCameraAnimator } from '../game/cameraAnimator';
 import {
   cameraToTransform,
   clampCamera,
@@ -12,18 +13,44 @@ import {
   normalizeBounds,
   normalizeVisibleRect,
   panCamera,
-  unionBounds,
   zoomCameraAt,
 } from '../game/camera';
-import { createFocusState, reduceFocusSnapshot } from '../game/cameraFocus';
+import { createFocusState, focusActionKey, reduceFocusAction } from '../game/cameraFocus';
+import {
+  POINTER_MODES,
+  beginMapPointer,
+  createMapPointerState,
+  endMapPointer,
+  moveMapPointer,
+} from '../game/mapPointer';
 import { sanitizeSvgMarkup } from '../game/mapImporter';
 import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
 
-const FOCUS_HOLD_MS = 1000;
+const FOCUS_HOLD_MS = 850;
+const CAMERA_ANIMATION_MS = 420;
+const MAX_FOCUS_FIT_MULTIPLIER = 4;
 
 function reducedMotion() {
   return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+}
+
+function copyCamera(camera) {
+  if (!camera) return null;
+  return {
+    focusX: camera.focusX,
+    focusY: camera.focusY,
+    scale: camera.scale,
+    anchorX: camera.anchorX ?? 0.5,
+    anchorY: camera.anchorY ?? 0.5,
+  };
+}
+
+function validRegionBounds(bounds) {
+  return bounds
+    && [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)
+    && bounds.width > 0
+    && bounds.height > 0;
 }
 
 export const MapViewer = forwardRef(function MapViewer({
@@ -46,13 +73,17 @@ export const MapViewer = forwardRef(function MapViewer({
   const visibleRectRef = useRef({ x: 0, y: 0, width: 1, height: 1 });
   const mapBoundsRef = useRef({ x: 0, y: 0, width: 1000, height: 1000 });
   const manualRef = useRef(false);
-  const pointersRef = useRef(new Map());
+  const pointerStateRef = useRef(createMapPointerState());
   const gestureRef = useRef(null);
-  const significantDrag = useRef(false);
-  const animationRef = useRef(null);
+  const capturedPointersRef = useRef(new Set());
+  const renderCameraRef = useRef(() => {});
+  const animatorRef = useRef(null);
+  const focusSequenceRef = useRef(null);
   const focusTimerRef = useRef(null);
-  const localRestoreRef = useRef(null);
-  const focusStateRef = useRef(createFocusState(roomData, { activePlayerId: null }));
+  const mapInitFrameRef = useRef(null);
+  const initialFitPendingRef = useRef(true);
+  const externalRectInitializedRef = useRef(false);
+  const containerSizeRef = useRef({ width: 0, height: 0 });
 
   const safeMapSvg = useMemo(() => {
     try {
@@ -63,100 +94,130 @@ export const MapViewer = forwardRef(function MapViewer({
     }
   }, [roomData.mapSvg]);
 
+  const viewBox = roomData.mapDefinition?.viewBox;
+  const viewBoxKey = [viewBox?.x, viewBox?.y, viewBox?.width, viewBox?.height].join(':');
+  const lastAction = roomData.lastAction || null;
+  const lastActionKey = focusActionKey(lastAction);
+  const actionType = lastAction?.type || null;
+  const actionActorId = lastAction?.actorId || null;
+  const actionRegionId = lastAction?.regionId || null;
+  const actionRegionBounds = actionRegionId
+    ? roomData.mapDefinition?.regionsById?.[actionRegionId]?.bounds || null
+    : null;
+  const actionBoundsKey = actionRegionBounds
+    ? [actionRegionBounds.x, actionRegionBounds.y, actionRegionBounds.width, actionRegionBounds.height].join(':')
+    : '';
+  const focusStateRef = useRef(createFocusState(lastAction));
+
   const paintFingerprint = useMemo(() => JSON.stringify((roomData.mapDefinition?.regionIds || []).map((id) => {
     const ownerId = roomData.claims?.[id]?.ownerId || '';
     return [id, ownerId, roomData.players?.[ownerId]?.color || ''];
   })), [roomData.claims, roomData.mapDefinition?.regionIds, roomData.players]);
   const legalFingerprint = useMemo(() => [...legalClaims].sort().join('|'), [legalClaims]);
 
-  const stopTimers = () => {
-    window.clearTimeout(focusTimerRef.current);
-    focusTimerRef.current = null;
-    animationRef.current = null;
-  };
-
-  const renderCamera = (camera, animate = false) => {
+  const renderCamera = (camera, { clamp = false } = {}) => {
     if (!camera || !transformRef.current) return;
-    const clamped = clampCamera(camera, mapBoundsRef.current, visibleRectRef.current);
-    cameraRef.current = clamped;
-    const transform = cameraToTransform(clamped, visibleRectRef.current);
-    transformRef.current.style.transition = animate && !reducedMotion()
-      ? 'transform 480ms cubic-bezier(.22,1,.36,1)'
-      : 'none';
+    const next = clamp
+      ? clampCamera(camera, mapBoundsRef.current, visibleRectRef.current)
+      : copyCamera(camera);
+    cameraRef.current = next;
+    const transform = cameraToTransform(next, visibleRectRef.current);
+    transformRef.current.style.transition = 'none';
     transformRef.current.style.transform = `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})`;
   };
+  renderCameraRef.current = renderCamera;
 
-  const fitMap = (markManual = true) => {
-    const camera = fitBoundsCamera(mapBoundsRef.current, visibleRectRef.current, 16);
-    manualRef.current = markManual;
-    baseCameraRef.current = camera;
-    localRestoreRef.current = null;
-    stopTimers();
-    renderCamera(camera, true);
-  };
-
-  const regionBounds = (regionIds) => {
-    const definitions = roomData.mapDefinition?.regionsById || {};
-    const values = regionIds.map((id) => {
-      if (definitions[id]?.bounds) return definitions[id].bounds;
-      const element = [...(svgRef.current?.querySelectorAll('[data-region-id]') || [])]
-        .find((candidate) => candidate.getAttribute('data-region-id') === id);
-      try {
-        const bounds = element?.getBBox?.();
-        return bounds && bounds.width >= 0 ? bounds : null;
-      } catch {
-        return null;
-      }
+  if (!animatorRef.current) {
+    animatorRef.current = createCameraAnimator({
+      onFrame: (camera) => renderCameraRef.current(camera),
     });
-    return unionBounds(values, mapBoundsRef.current);
-  };
+  }
 
-  const focusBounds = (bounds, { restoreAfter = false, local = false, onRestored } = {}) => {
-    if (!bounds) return;
-    stopTimers();
-    if (local) localRestoreRef.current = { ...baseCameraRef.current };
-    const target = fitBoundsCamera(bounds, visibleRectRef.current, Math.min(42, visibleRectRef.current.width * 0.09));
-    animationRef.current = { bounds, target, kind: 'focus' };
-    renderCamera(target, true);
-    if (restoreAfter) {
-      focusTimerRef.current = window.setTimeout(() => {
-        const base = baseCameraRef.current;
-        animationRef.current = { target: base, kind: 'restore' };
-        renderCamera(base, true);
-        focusTimerRef.current = window.setTimeout(() => {
-          animationRef.current = null;
-          onRestored?.();
-        }, reducedMotion() ? 0 : 500);
-      }, reducedMotion() ? 40 : FOCUS_HOLD_MS);
-    }
+  const clearFocusTimer = () => {
+    window.clearTimeout(focusTimerRef.current);
+    focusTimerRef.current = null;
   };
 
   const cancelAutomationForManualInput = () => {
-    stopTimers();
-    manualRef.current = true;
-    baseCameraRef.current = { ...cameraRef.current };
-    localRestoreRef.current = null;
+    clearFocusTimer();
+    animatorRef.current.cancel();
+    focusSequenceRef.current = null;
+    if (cameraRef.current) {
+      manualRef.current = true;
+      baseCameraRef.current = copyCamera(cameraRef.current);
+    }
+  };
+
+  const fitMap = (markManual = true) => {
+    clearFocusTimer();
+    animatorRef.current.cancel();
+    focusSequenceRef.current = null;
+    const camera = fitBoundsCamera(mapBoundsRef.current, visibleRectRef.current, 16);
+    manualRef.current = markManual;
+    initialFitPendingRef.current = false;
+    baseCameraRef.current = copyCamera(camera);
+    renderCamera(camera, { clamp: true });
+  };
+
+  const getRegionBounds = (regionId, preferredBounds) => {
+    if (validRegionBounds(preferredBounds)) return { ...preferredBounds };
+    const element = [...(svgRef.current?.querySelectorAll('[data-region-id]') || [])]
+      .find((candidate) => candidate.getAttribute('data-region-id') === regionId);
+    try {
+      const bounds = element?.getBBox?.();
+      return validRegionBounds(bounds)
+        ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+        : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const startRemoteClaimFocus = (regionId, preferredBounds, eventId) => {
+    const bounds = getRegionBounds(regionId, preferredBounds);
+    if (!bounds || !cameraRef.current) return;
+    clearFocusTimer();
+    animatorRef.current.cancel();
+    const originalBase = focusSequenceRef.current?.baseCamera
+      || copyCamera(baseCameraRef.current || cameraRef.current);
+    const regionFit = fitBoundsCamera(bounds, visibleRectRef.current, Math.min(36, visibleRectRef.current.width * 0.08));
+    const fullMapScale = fitBoundsCamera(mapBoundsRef.current, visibleRectRef.current, 16).scale;
+    const maximumScale = Math.max(originalBase.scale, fullMapScale * MAX_FOCUS_FIT_MULTIPLIER);
+    const targetCamera = { ...regionFit, scale: Math.min(regionFit.scale, maximumScale) };
+    const sequence = { eventId, baseCamera: originalBase, targetCamera };
+    focusSequenceRef.current = sequence;
+    const duration = reducedMotion() ? 0 : CAMERA_ANIMATION_MS;
+    animatorRef.current.animate(copyCamera(cameraRef.current), targetCamera, {
+      duration,
+      onComplete: () => {
+        if (focusSequenceRef.current !== sequence) return;
+        focusTimerRef.current = window.setTimeout(() => {
+          if (focusSequenceRef.current !== sequence) return;
+          animatorRef.current.animate(copyCamera(cameraRef.current), sequence.baseCamera, {
+            duration,
+            onComplete: () => {
+              if (focusSequenceRef.current !== sequence) return;
+              renderCamera(sequence.baseCamera);
+              baseCameraRef.current = copyCamera(sequence.baseCamera);
+              focusSequenceRef.current = null;
+              focusTimerRef.current = null;
+            },
+          });
+        }, reducedMotion() ? 60 : FOCUS_HOLD_MS);
+      },
+    });
   };
 
   useImperativeHandle(forwardedRef, () => ({
     setVisibleMapRect(rect) {
       visibleRectRef.current = normalizeVisibleRect(rect);
-      if (!cameraRef.current) {
+      const firstExternalRect = !externalRectInitializedRef.current;
+      externalRectInitializedRef.current = true;
+      if (!cameraRef.current || initialFitPendingRef.current || (firstExternalRect && !manualRef.current)) {
         fitMap(false);
         return;
       }
-      if (animationRef.current?.bounds) {
-        const target = fitBoundsCamera(animationRef.current.bounds, visibleRectRef.current, 28);
-        animationRef.current.target = target;
-        renderCamera(target, false);
-      } else if (!manualRef.current) {
-        const fitted = fitBoundsCamera(mapBoundsRef.current, visibleRectRef.current, 16);
-        baseCameraRef.current = fitted;
-        renderCamera(fitted, false);
-      } else {
-        renderCamera(cameraRef.current, false);
-        baseCameraRef.current = { ...cameraRef.current };
-      }
+      renderCamera(cameraRef.current);
     },
     fitMap() {
       fitMap(true);
@@ -179,7 +240,7 @@ export const MapViewer = forwardRef(function MapViewer({
   }, [legalFingerprint, paintFingerprint, safeMapSvg, selectedId]);
 
   useEffect(() => {
-    const bounds = normalizeBounds(roomData.mapDefinition?.viewBox);
+    const bounds = normalizeBounds(viewBox);
     mapBoundsRef.current = bounds;
     if (svgRef.current) {
       svgRef.current.style.left = `${bounds.x}px`;
@@ -187,127 +248,205 @@ export const MapViewer = forwardRef(function MapViewer({
       svgRef.current.style.width = `${bounds.width}px`;
       svgRef.current.style.height = `${bounds.height}px`;
     }
+    clearFocusTimer();
+    animatorRef.current.cancel();
+    focusSequenceRef.current = null;
     manualRef.current = false;
     cameraRef.current = null;
     baseCameraRef.current = null;
-    window.requestAnimationFrame(() => fitMap(false));
-    // fitMap intentionally reads the latest camera refs without changing map identity.
+    initialFitPendingRef.current = true;
+    externalRectInitializedRef.current = false;
+    window.cancelAnimationFrame(mapInitFrameRef.current);
+    mapInitFrameRef.current = window.requestAnimationFrame(() => {
+      const rectangle = containerRef.current?.getBoundingClientRect();
+      if (!rectangle || rectangle.width <= 0 || rectangle.height <= 0) return;
+      if (!externalRectInitializedRef.current) {
+        visibleRectRef.current = { x: 0, y: 0, width: rectangle.width, height: rectangle.height };
+      }
+      fitMap(false);
+    });
+    // Map identity uses primitive SVG/viewBox values and intentionally excludes room snapshots.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomData.mapDefinition?.viewBox, safeMapSvg]);
+  }, [safeMapSvg, viewBoxKey]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return undefined;
     const resize = () => {
-      const rect = container.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-      visibleRectRef.current = { x: 0, y: 0, width: rect.width, height: rect.height };
-      if (!cameraRef.current || !manualRef.current) fitMap(false);
-      else renderCamera(cameraRef.current, false);
+      const rectangle = container.getBoundingClientRect();
+      if (rectangle.width <= 0 || rectangle.height <= 0) return;
+      const previous = containerSizeRef.current;
+      const changed = previous.width !== rectangle.width || previous.height !== rectangle.height;
+      containerSizeRef.current = { width: rectangle.width, height: rectangle.height };
+      if (!externalRectInitializedRef.current) {
+        visibleRectRef.current = { x: 0, y: 0, width: rectangle.width, height: rectangle.height };
+      }
+      if (!cameraRef.current || initialFitPendingRef.current) {
+        fitMap(false);
+      } else if (changed && !manualRef.current && !focusSequenceRef.current && !externalRectInitializedRef.current) {
+        fitMap(false);
+      } else {
+        renderCamera(cameraRef.current);
+      }
     };
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(resize) : null;
     observer?.observe(container);
     resize();
     return () => observer?.disconnect();
-    // Resize callbacks operate on refs so manual cameras survive React renders.
+    // Resize callbacks operate on canonical refs and never depend on room snapshots.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    const result = reduceFocusSnapshot(focusStateRef.current, roomData, localPlayerId);
+    const action = lastActionKey ? {
+      actionId: lastActionKey,
+      type: actionType,
+      actorId: actionActorId,
+      regionId: actionRegionId,
+    } : null;
+    const result = reduceFocusAction(focusStateRef.current, action, localPlayerId);
     focusStateRef.current = result.state;
-    const effect = result.effect;
-    if (!effect || !cameraRef.current) return;
-    const focusLocalTurn = () => {
-      const owned = roomData.players?.[localPlayerId]?.regionIds || [];
-      const targets = owned.length ? owned : (legalClaims.length ? legalClaims : roomData.mapDefinition?.regionIds || []);
-      focusBounds(regionBounds(targets), { local: true });
-    };
-    if (effect.type === 'local_turn') {
-      focusLocalTurn();
-    } else if (effect.type === 'local_restore') {
-      if (!localRestoreRef.current) return;
-      const base = localRestoreRef.current;
-      localRestoreRef.current = null;
-      animationRef.current = { target: base, kind: 'restore' };
-      renderCamera(base, true);
-      focusTimerRef.current = window.setTimeout(() => { animationRef.current = null; }, reducedMotion() ? 0 : 500);
-    } else if (effect.type === 'remote_action') {
-      const owned = roomData.players?.[effect.actorId]?.regionIds || [];
-      if (effect.actionType === 'save_income' && owned.length === 0) return;
-      let targets = owned;
-      if (effect.actionType === 'claim' && effect.regionId) {
-        const neighbors = roomData.mapDefinition?.regionsById?.[effect.regionId]?.claimNeighbors || [];
-        targets = [effect.regionId, ...neighbors.filter((id) => roomData.claims?.[id]?.ownerId === effect.actorId)];
-      }
-      focusBounds(regionBounds(targets), {
-        restoreAfter: true,
-        onRestored: effect.localTurnStarted ? focusLocalTurn : undefined,
-      });
+    if (result.effect?.type === 'remote_claim') {
+      startRemoteClaimFocus(result.effect.regionId, actionRegionBounds, result.effect.actionId);
     }
-    // Focus helpers intentionally use current room data while event identity controls replays.
+    // Event identity and primitive region bounds are the only focus dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    legalFingerprint,
+    lastActionKey,
+    actionType,
+    actionActorId,
+    actionRegionId,
+    actionBoundsKey,
     localPlayerId,
-    roomData,
   ]);
 
-  useEffect(() => () => stopTimers(), []);
+  useEffect(() => () => {
+    clearFocusTimer();
+    // cancel() also supports React StrictMode's setup-cleanup-setup cycle.
+    animatorRef.current.cancel();
+    window.cancelAnimationFrame(mapInitFrameRef.current);
+    capturedPointersRef.current.forEach((pointerId) => {
+      try {
+        containerRef.current?.releasePointerCapture?.(pointerId);
+      } catch {
+        // The browser may already have released capture during unmount.
+      }
+    });
+    capturedPointersRef.current.clear();
+  }, []);
 
   const localPoint = (event) => {
-    const rect = containerRef.current.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const rectangle = containerRef.current.getBoundingClientRect();
+    return { x: event.clientX - rectangle.left, y: event.clientY - rectangle.top };
+  };
+
+  const regionIdFromTarget = (target) => {
+    const region = target?.closest?.('[data-region-id]');
+    return region && svgRef.current?.contains(region)
+      ? region.getAttribute('data-region-id')
+      : null;
+  };
+
+  const capturePointers = (pointerIds) => {
+    pointerIds.forEach((pointerId) => {
+      if (capturedPointersRef.current.has(pointerId)) return;
+      try {
+        containerRef.current?.setPointerCapture?.(pointerId);
+        capturedPointersRef.current.add(pointerId);
+      } catch {
+        // Pointer capture is best-effort on older touch browsers.
+      }
+    });
+  };
+
+  const releasePointers = (pointerIds) => {
+    pointerIds.forEach((pointerId) => {
+      if (!capturedPointersRef.current.has(pointerId)) return;
+      try {
+        containerRef.current?.releasePointerCapture?.(pointerId);
+      } catch {
+        // Capture can be released automatically before pointerup is delivered.
+      }
+      capturedPointersRef.current.delete(pointerId);
+    });
+  };
+
+  const pointerInput = (event) => {
+    const point = localPoint(event);
+    return {
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      button: event.button,
+      x: point.x,
+      y: point.y,
+      regionId: regionIdFromTarget(event.target),
+    };
   };
 
   const startPointer = (event) => {
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    const result = beginMapPointer(pointerStateRef.current, pointerInput(event));
+    pointerStateRef.current = result.state;
+    if (!result.accepted || !result.startedPinch) return;
     cancelAutomationForManualInput();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    pointersRef.current.set(event.pointerId, localPoint(event));
-    significantDrag.current = false;
-    if (pointersRef.current.size === 1) {
-      gestureRef.current = { type: 'pan', point: localPoint(event), camera: { ...cameraRef.current } };
-    } else if (pointersRef.current.size === 2) {
-      const [first, second] = [...pointersRef.current.values()];
-      gestureRef.current = {
-        type: 'pinch',
-        distance: Math.hypot(first.x - second.x, first.y - second.y),
-        camera: { ...cameraRef.current },
-      };
-    }
-    containerRef.current.classList.add('is-dragging');
+    capturePointers(result.captureIds);
+    const pointers = Object.values(result.state.pointers);
+    const [first, second] = pointers;
+    gestureRef.current = {
+      type: POINTER_MODES.PINCHING,
+      camera: copyCamera(cameraRef.current),
+      distance: Math.max(1, Math.hypot(first.x - second.x, first.y - second.y)),
+    };
+    containerRef.current?.classList.add('is-dragging');
   };
 
   const movePointer = (event) => {
-    if (!pointersRef.current.has(event.pointerId) || !gestureRef.current) return;
-    pointersRef.current.set(event.pointerId, localPoint(event));
-    if (pointersRef.current.size === 1 && gestureRef.current.type === 'pan') {
-      const point = localPoint(event);
-      const delta = { x: point.x - gestureRef.current.point.x, y: point.y - gestureRef.current.point.y };
-      if (Math.hypot(delta.x, delta.y) > 8) significantDrag.current = true;
-      const next = panCamera(gestureRef.current.camera, delta, mapBoundsRef.current, visibleRectRef.current);
-      baseCameraRef.current = next;
-      renderCamera(next, false);
-    } else if (pointersRef.current.size >= 2) {
-      const [first, second] = [...pointersRef.current.values()];
-      const distance = Math.hypot(first.x - second.x, first.y - second.y);
+    const result = moveMapPointer(pointerStateRef.current, pointerInput(event));
+    pointerStateRef.current = result.state;
+    if (!result.accepted || !cameraRef.current) return;
+    if (result.startedPan) {
+      cancelAutomationForManualInput();
+      capturePointers(result.captureIds);
+      gestureRef.current = { type: POINTER_MODES.PANNING, camera: copyCamera(cameraRef.current) };
+      containerRef.current?.classList.add('is-dragging');
+    }
+    if (result.state.mode === POINTER_MODES.PANNING && result.delta && gestureRef.current?.camera) {
+      const next = panCamera(gestureRef.current.camera, result.delta, mapBoundsRef.current, visibleRectRef.current);
+      baseCameraRef.current = copyCamera(next);
+      renderCamera(next);
+    } else if (result.state.mode === POINTER_MODES.PINCHING && gestureRef.current?.camera) {
+      const pointers = Object.values(result.state.pointers);
+      if (pointers.length < 2) return;
+      const [first, second] = pointers;
+      const distance = Math.max(1, Math.hypot(first.x - second.x, first.y - second.y));
       const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
       const fitScale = fitBoundsCamera(mapBoundsRef.current, visibleRectRef.current, 0).scale;
-      const nextScale = Math.min(fitScale * 8, Math.max(fitScale * 0.55, gestureRef.current.camera.scale * distance / gestureRef.current.distance));
-      const next = zoomCameraAt(gestureRef.current.camera, nextScale, center, visibleRectRef.current, mapBoundsRef.current);
-      significantDrag.current = true;
-      baseCameraRef.current = next;
-      renderCamera(next, false);
+      const nextScale = Math.min(
+        fitScale * 8,
+        Math.max(fitScale * 0.55, gestureRef.current.camera.scale * distance / gestureRef.current.distance),
+      );
+      const next = zoomCameraAt(
+        gestureRef.current.camera,
+        nextScale,
+        center,
+        visibleRectRef.current,
+        mapBoundsRef.current,
+      );
+      baseCameraRef.current = copyCamera(next);
+      renderCamera(next);
     }
   };
 
-  const stopPointer = (event) => {
-    pointersRef.current.delete(event.pointerId);
-    if (pointersRef.current.size === 1) {
-      const point = [...pointersRef.current.values()][0];
-      gestureRef.current = { type: 'pan', point, camera: { ...cameraRef.current } };
-    } else if (pointersRef.current.size === 0) {
+  const stopPointer = (event, cancelled = false) => {
+    const result = endMapPointer(pointerStateRef.current, event.pointerId, { cancelled });
+    pointerStateRef.current = result.state;
+    if (!result.accepted) return;
+    releasePointers(result.releaseIds);
+    if (result.selectionRegionId) setSelectedId(result.selectionRegionId);
+    if (result.continuedPan) {
+      gestureRef.current = { type: POINTER_MODES.PANNING, camera: copyCamera(cameraRef.current) };
+      return;
+    }
+    if (result.state.mode === POINTER_MODES.IDLE) {
       gestureRef.current = null;
       containerRef.current?.classList.remove('is-dragging');
     }
@@ -315,44 +454,39 @@ export const MapViewer = forwardRef(function MapViewer({
 
   const handleWheel = (event) => {
     event.preventDefault();
+    if (!cameraRef.current) return;
     cancelAutomationForManualInput();
     const point = localPoint(event);
     const fitScale = fitBoundsCamera(mapBoundsRef.current, visibleRectRef.current, 0).scale;
-    const nextScale = Math.min(fitScale * 8, Math.max(fitScale * 0.55, cameraRef.current.scale * (event.deltaY > 0 ? 0.9 : 1.1)));
+    const nextScale = Math.min(
+      fitScale * 8,
+      Math.max(fitScale * 0.55, cameraRef.current.scale * (event.deltaY > 0 ? 0.9 : 1.1)),
+    );
     const next = zoomCameraAt(cameraRef.current, nextScale, point, visibleRectRef.current, mapBoundsRef.current);
-    baseCameraRef.current = next;
-    renderCamera(next, false);
+    baseCameraRef.current = copyCamera(next);
+    renderCamera(next);
   };
 
   const zoomBy = (factor) => {
+    if (!cameraRef.current) return;
     cancelAutomationForManualInput();
     const rect = visibleRectRef.current;
     const point = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
     const fitScale = fitBoundsCamera(mapBoundsRef.current, rect, 0).scale;
     const nextScale = Math.min(fitScale * 8, Math.max(fitScale * 0.55, cameraRef.current.scale * factor));
     const next = zoomCameraAt(cameraRef.current, nextScale, point, rect, mapBoundsRef.current);
-    baseCameraRef.current = next;
-    renderCamera(next, true);
-  };
-
-  const selectRegion = (event) => {
-    if (significantDrag.current) return;
-    const region = event.target.closest?.('[data-region-id]');
-    if (region && svgRef.current?.contains(region)) {
-      event.stopPropagation();
-      setSelectedId(region.getAttribute('data-region-id'));
-    }
+    baseCameraRef.current = copyCamera(next);
+    renderCamera(next);
   };
 
   return (
     <main
       ref={containerRef}
       className={`aop-map-surface aop-map-viewer ${className}`}
-      onClick={selectRegion}
       onPointerDown={startPointer}
       onPointerMove={movePointer}
-      onPointerUp={stopPointer}
-      onPointerCancel={stopPointer}
+      onPointerUp={(event) => stopPointer(event)}
+      onPointerCancel={(event) => stopPointer(event, true)}
       onWheel={handleWheel}
     >
       <div ref={transformRef} className="aop-map-transform">

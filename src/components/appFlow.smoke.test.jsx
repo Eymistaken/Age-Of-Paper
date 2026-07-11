@@ -154,7 +154,18 @@ describe('local application flow smoke', () => {
   it('renders claiming, selects a region, and submits the purchase transaction', async () => {
     await render(<GameRoom user={{ uid: 'p1' }} roomCode="ABCD" roomData={claimingRoom} leaveRoom={() => {}} resetApp={() => {}}/>);
     const mapRegion = container.querySelector('[data-region-id="paper_valley"]');
-    await act(async () => mapRegion.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    const pointer = (type) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        pointerId: { value: 1 }, pointerType: { value: 'mouse' }, button: { value: 0 },
+        clientX: { value: 10 }, clientY: { value: 10 },
+      });
+      return event;
+    };
+    await act(async () => {
+      mapRegion.dispatchEvent(pointer('pointerdown'));
+      mapRegion.dispatchEvent(pointer('pointerup'));
+    });
     expect(container.textContent).toContain('Kâğıt Vadisi');
     expect(container.textContent).toContain('Bu tarafsız bölge satın alınabilir.');
     const buyButton = [...container.querySelectorAll('button')].find((button) => button.textContent.includes('Satın Al'));
