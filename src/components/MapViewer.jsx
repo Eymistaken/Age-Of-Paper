@@ -10,6 +10,7 @@ import {
   cameraToTransform,
   clampCamera,
   fitBoundsCamera,
+  fitFocusBoundsCamera,
   normalizeBounds,
   normalizeVisibleRect,
   panCamera,
@@ -24,6 +25,7 @@ import {
   moveMapPointer,
 } from '../game/mapPointer';
 import { sanitizeSvgMarkup } from '../game/mapImporter';
+import { resolveRegionBoundsInRootViewBox } from '../game/svgGeometry';
 import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
 
@@ -44,13 +46,6 @@ function copyCamera(camera) {
     anchorX: camera.anchorX ?? 0.5,
     anchorY: camera.anchorY ?? 0.5,
   };
-}
-
-function validRegionBounds(bounds) {
-  return bounds
-    && [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)
-    && bounds.width > 0
-    && bounds.height > 0;
 }
 
 export const MapViewer = forwardRef(function MapViewer({
@@ -81,6 +76,7 @@ export const MapViewer = forwardRef(function MapViewer({
   const focusSequenceRef = useRef(null);
   const focusTimerRef = useRef(null);
   const mapInitFrameRef = useRef(null);
+  const focusMeasureRef = useRef({ token: 0, frameId: null });
   const initialFitPendingRef = useRef(true);
   const externalRectInitializedRef = useRef(false);
   const containerSizeRef = useRef({ width: 0, height: 0 });
@@ -107,6 +103,8 @@ export const MapViewer = forwardRef(function MapViewer({
   const actionBoundsKey = actionRegionBounds
     ? [actionRegionBounds.x, actionRegionBounds.y, actionRegionBounds.width, actionRegionBounds.height].join(':')
     : '';
+  const geometryVersion = roomData.mapDefinition?.geometryVersion || 0;
+  const boundsSpace = roomData.mapDefinition?.boundsSpace || '';
   const focusStateRef = useRef(createFocusState(lastAction));
 
   const paintFingerprint = useMemo(() => JSON.stringify((roomData.mapDefinition?.regionIds || []).map((id) => {
@@ -138,7 +136,14 @@ export const MapViewer = forwardRef(function MapViewer({
     focusTimerRef.current = null;
   };
 
+  const cancelFocusMeasurement = () => {
+    focusMeasureRef.current.token += 1;
+    window.cancelAnimationFrame(focusMeasureRef.current.frameId);
+    focusMeasureRef.current.frameId = null;
+  };
+
   const cancelAutomationForManualInput = () => {
+    cancelFocusMeasurement();
     clearFocusTimer();
     animatorRef.current.cancel();
     focusSequenceRef.current = null;
@@ -149,6 +154,7 @@ export const MapViewer = forwardRef(function MapViewer({
   };
 
   const fitMap = (markManual = true) => {
+    cancelFocusMeasurement();
     clearFocusTimer();
     animatorRef.current.cancel();
     focusSequenceRef.current = null;
@@ -159,28 +165,32 @@ export const MapViewer = forwardRef(function MapViewer({
     renderCamera(camera, { clamp: true });
   };
 
-  const getRegionBounds = (regionId, preferredBounds) => {
-    if (validRegionBounds(preferredBounds)) return { ...preferredBounds };
+  const getRegionBounds = (regionId, preferredBounds, allowStored = false) => {
     const element = [...(svgRef.current?.querySelectorAll('[data-region-id]') || [])]
       .find((candidate) => candidate.getAttribute('data-region-id') === regionId);
-    try {
-      const bounds = element?.getBBox?.();
-      return validRegionBounds(bounds)
-        ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
-        : null;
-    } catch {
-      return null;
-    }
+    const rootSvg = svgRef.current?.querySelector('svg');
+    return resolveRegionBoundsInRootViewBox({
+      element,
+      rootSvg,
+      storedBounds: preferredBounds,
+      mapBounds: mapBoundsRef.current,
+      metadata: { geometryVersion, boundsSpace },
+      allowStored,
+    });
   };
 
-  const startRemoteClaimFocus = (regionId, preferredBounds, eventId) => {
-    const bounds = getRegionBounds(regionId, preferredBounds);
+  const startRemoteClaimFocus = (bounds, eventId) => {
     if (!bounds || !cameraRef.current) return;
     clearFocusTimer();
     animatorRef.current.cancel();
     const originalBase = focusSequenceRef.current?.baseCamera
       || copyCamera(baseCameraRef.current || cameraRef.current);
-    const regionFit = fitBoundsCamera(bounds, visibleRectRef.current, Math.min(36, visibleRectRef.current.width * 0.08));
+    const regionFit = fitFocusBoundsCamera(
+      bounds,
+      visibleRectRef.current,
+      Math.min(36, visibleRectRef.current.width * 0.08),
+    );
+    if (!regionFit) return;
     const fullMapScale = fitBoundsCamera(mapBoundsRef.current, visibleRectRef.current, 16).scale;
     const maximumScale = Math.max(originalBase.scale, fullMapScale * MAX_FOCUS_FIT_MULTIPLIER);
     const targetCamera = { ...regionFit, scale: Math.min(regionFit.scale, maximumScale) };
@@ -206,6 +216,27 @@ export const MapViewer = forwardRef(function MapViewer({
         }, reducedMotion() ? 60 : FOCUS_HOLD_MS);
       },
     });
+  };
+
+  const queueRemoteClaimFocus = (regionId, preferredBounds, eventId) => {
+    cancelFocusMeasurement();
+    const token = focusMeasureRef.current.token;
+    const attempt = (retryCount) => {
+      if (focusMeasureRef.current.token !== token) return;
+      const allowStored = retryCount >= 2;
+      const bounds = getRegionBounds(regionId, preferredBounds, allowStored);
+      if (bounds) {
+        focusMeasureRef.current.frameId = null;
+        startRemoteClaimFocus(bounds, eventId);
+        return;
+      }
+      if (retryCount >= 2) {
+        focusMeasureRef.current.frameId = null;
+        return;
+      }
+      focusMeasureRef.current.frameId = window.requestAnimationFrame(() => attempt(retryCount + 1));
+    };
+    attempt(0);
   };
 
   useImperativeHandle(forwardedRef, () => ({
@@ -249,6 +280,7 @@ export const MapViewer = forwardRef(function MapViewer({
       svgRef.current.style.height = `${bounds.height}px`;
     }
     clearFocusTimer();
+    cancelFocusMeasurement();
     animatorRef.current.cancel();
     focusSequenceRef.current = null;
     manualRef.current = false;
@@ -307,7 +339,7 @@ export const MapViewer = forwardRef(function MapViewer({
     const result = reduceFocusAction(focusStateRef.current, action, localPlayerId);
     focusStateRef.current = result.state;
     if (result.effect?.type === 'remote_claim') {
-      startRemoteClaimFocus(result.effect.regionId, actionRegionBounds, result.effect.actionId);
+      queueRemoteClaimFocus(result.effect.regionId, actionRegionBounds, result.effect.actionId);
     }
     // Event identity and primitive region bounds are the only focus dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -317,11 +349,14 @@ export const MapViewer = forwardRef(function MapViewer({
     actionActorId,
     actionRegionId,
     actionBoundsKey,
+    geometryVersion,
+    boundsSpace,
     localPlayerId,
   ]);
 
   useEffect(() => () => {
     clearFocusTimer();
+    cancelFocusMeasurement();
     // cancel() also supports React StrictMode's setup-cleanup-setup cycle.
     animatorRef.current.cancel();
     window.cancelAnimationFrame(mapInitFrameRef.current);

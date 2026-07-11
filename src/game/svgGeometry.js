@@ -10,6 +10,11 @@ function validBounds(bounds) {
     && bounds.height > 0;
 }
 
+function validMatrix(matrix) {
+  return matrix
+    && [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f].every(Number.isFinite);
+}
+
 function hasTransformContext(element) {
   let current = element;
   while (current && current.tagName?.toLowerCase() !== 'svg') {
@@ -112,15 +117,15 @@ export function basicShapeBoundary(element) {
   return null;
 }
 
-export function applyMatrixToBounds(bounds, matrix, measurementScale = 1) {
+export function applyMatrixToBounds(bounds, matrix) {
   const points = [
     [bounds.x, bounds.y],
     [bounds.x + bounds.width, bounds.y],
     [bounds.x, bounds.y + bounds.height],
     [bounds.x + bounds.width, bounds.y + bounds.height],
   ].map(([x, y]) => ({
-    x: (matrix.a * x + matrix.c * y + matrix.e) / measurementScale,
-    y: (matrix.b * x + matrix.d * y + matrix.f) / measurementScale,
+    x: matrix.a * x + matrix.c * y + matrix.e,
+    y: matrix.b * x + matrix.d * y + matrix.f,
   }));
   const xs = points.map((point) => point.x);
   const ys = points.map((point) => point.y);
@@ -132,11 +137,72 @@ export function applyMatrixToBounds(bounds, matrix, measurementScale = 1) {
   };
 }
 
-function transformedPoint(point, matrix, measurementScale) {
+function transformedPoint(point, matrix) {
   return {
-    x: (matrix.a * point.x + matrix.c * point.y + matrix.e) / measurementScale,
-    y: (matrix.b * point.x + matrix.d * point.y + matrix.f) / measurementScale,
+    x: matrix.a * point.x + matrix.c * point.y + matrix.e,
+    y: matrix.b * point.x + matrix.d * point.y + matrix.f,
   };
+}
+
+export function measureElementBoundsInRootViewBox(element, rootSvg) {
+  if (!element || !rootSvg
+    || typeof element.getBBox !== 'function'
+    || typeof element.getScreenCTM !== 'function'
+    || typeof rootSvg.getScreenCTM !== 'function') return null;
+  try {
+    const localBounds = element.getBBox();
+    const rootMatrix = rootSvg.getScreenCTM();
+    const elementMatrix = element.getScreenCTM();
+    if (!validBounds(localBounds) || !validMatrix(rootMatrix) || !validMatrix(elementMatrix)
+      || typeof rootMatrix.inverse !== 'function') return null;
+    const inverseRoot = rootMatrix.inverse();
+    const relativeMatrix = typeof inverseRoot?.multiply === 'function'
+      ? inverseRoot.multiply(elementMatrix)
+      : null;
+    if (!validMatrix(relativeMatrix)) return null;
+    const bounds = applyMatrixToBounds(localBounds, relativeMatrix);
+    return validBounds(bounds) ? bounds : null;
+  } catch {
+    return null;
+  }
+}
+
+function boundsArePlausibleForMap(bounds, mapBounds) {
+  if (!validBounds(bounds) || !validBounds(mapBounds)) return false;
+  const right = Math.min(bounds.x + bounds.width, mapBounds.x + mapBounds.width);
+  const bottom = Math.min(bounds.y + bounds.height, mapBounds.y + mapBounds.height);
+  const overlapWidth = Math.max(0, right - Math.max(bounds.x, mapBounds.x));
+  const overlapHeight = Math.max(0, bottom - Math.max(bounds.y, mapBounds.y));
+  if (overlapWidth <= 0 || overlapHeight <= 0) return false;
+  if (bounds.width > mapBounds.width * 1.5 || bounds.height > mapBounds.height * 1.5) return false;
+  const centerX = bounds.x + bounds.width / 2;
+  const centerY = bounds.y + bounds.height / 2;
+  return centerX >= mapBounds.x - mapBounds.width * 0.1
+    && centerX <= mapBounds.x + mapBounds.width * 1.1
+    && centerY >= mapBounds.y - mapBounds.height * 0.1
+    && centerY <= mapBounds.y + mapBounds.height * 1.1;
+}
+
+export function isStoredRegionBoundsTrusted(bounds, mapBounds, metadata = {}) {
+  return metadata.geometryVersion >= 2
+    && metadata.boundsSpace === 'viewBox'
+    && boundsArePlausibleForMap(bounds, mapBounds);
+}
+
+export function resolveRegionBoundsInRootViewBox({
+  element,
+  rootSvg,
+  storedBounds,
+  mapBounds,
+  metadata,
+  allowStored = false,
+}) {
+  const liveBounds = measureElementBoundsInRootViewBox(element, rootSvg);
+  if (boundsArePlausibleForMap(liveBounds, mapBounds)) return liveBounds;
+  if (allowStored && isStoredRegionBoundsTrusted(storedBounds, mapBounds, metadata)) {
+    return { ...storedBounds };
+  }
+  return null;
 }
 
 function browserMeasuredGeometry(svg, regionIds, viewBox, hostDocument) {
@@ -178,10 +244,17 @@ function browserMeasuredGeometry(svg, regionIds, viewBox, hostDocument) {
       if (!element || typeof element.getBBox !== 'function') continue;
       try {
         const localBounds = element.getBBox();
-        const matrix = typeof element.getCTM === 'function' ? element.getCTM() : null;
-        const bounds = matrix
-          ? applyMatrixToBounds(localBounds, matrix, measurementScale)
-          : (!hasTransformContext(element) ? localBounds : null);
+        const rootMatrix = clone.getScreenCTM?.();
+        const elementMatrix = element.getScreenCTM?.();
+        const inverseRoot = validMatrix(rootMatrix) && typeof rootMatrix.inverse === 'function'
+          ? rootMatrix.inverse()
+          : null;
+        const matrix = inverseRoot && validMatrix(elementMatrix) && typeof inverseRoot.multiply === 'function'
+          ? inverseRoot.multiply(elementMatrix)
+          : null;
+        const bounds = validMatrix(matrix)
+          ? applyMatrixToBounds(localBounds, matrix)
+          : (!hasTransformContext(element) ? basicShapeBounds(element) : null);
         if (validBounds(bounds)) boundsById.set(regionId, bounds);
 
         if (matrix && typeof element.getTotalLength === 'function' && typeof element.getPointAtLength === 'function') {
@@ -192,7 +265,7 @@ function browserMeasuredGeometry(svg, regionIds, viewBox, hostDocument) {
             const lines = [[]];
             for (let index = 0; index <= samples; index += 1) {
               const localPoint = element.getPointAtLength((totalLength * index) / samples);
-              const point = transformedPoint(localPoint, matrix, measurementScale);
+              const point = transformedPoint(localPoint, matrix);
               const current = lines.at(-1);
               const previous = current.at(-1);
               if (previous && Math.hypot(point.x - previous.x, point.y - previous.y) > targetStep * 8) {

@@ -15,6 +15,8 @@ describe('SVG map importer', () => {
     const result = importSvgMap(svg);
     expect(result.mapDefinition.regionIds).toEqual(['north_east', 'south']);
     expect(result.mapDefinition.pricingVersion).toBe(2);
+    expect(result.mapDefinition.geometryVersion).toBe(2);
+    expect(result.mapDefinition.boundsSpace).toBe('viewBox');
     expect(result.mapDefinition.regionsById.north_east).toMatchObject({ price: 4000, income: 700 });
     expect(result.mapDefinition.regionsById.south).toMatchObject({ price: 5000, income: 800 });
     expect(result.validation.valid).toBe(true);

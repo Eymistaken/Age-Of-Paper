@@ -42,6 +42,16 @@ export function fitBoundsCamera(targetBounds, visibleRect, padding = 20) {
   };
 }
 
+export function fitFocusBoundsCamera(targetBounds, visibleRect, padding = 20) {
+  if (!targetBounds
+    || ![targetBounds.x, targetBounds.y, targetBounds.width, targetBounds.height].every(Number.isFinite)
+    || targetBounds.width <= 0 || targetBounds.height <= 0
+    || !visibleRect
+    || ![visibleRect.x, visibleRect.y, visibleRect.width, visibleRect.height].every(Number.isFinite)
+    || visibleRect.width <= 0 || visibleRect.height <= 0) return null;
+  return fitBoundsCamera(targetBounds, visibleRect, padding);
+}
+
 export function cameraForVisibleRect(camera, mapBounds, visibleRect, userControlled, padding = 16) {
   if (userControlled && camera) return clampCamera(camera, mapBounds, visibleRect);
   return fitBoundsCamera(mapBounds, visibleRect, padding);

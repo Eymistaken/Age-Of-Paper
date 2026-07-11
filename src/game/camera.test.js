@@ -4,6 +4,7 @@ import {
   cameraToTransform,
   clampCamera,
   fitBoundsCamera,
+  fitFocusBoundsCamera,
   panCamera,
 } from './camera';
 
@@ -58,5 +59,12 @@ describe('canonical map camera', () => {
     const manual = { focusX: 720, focusY: 280, scale: 0.8 };
     expect(cameraForVisibleRect(manual, mapBounds, rect, true)).toMatchObject(manual);
     expect(cameraForVisibleRect(manual, mapBounds, rect, false).scale).not.toBe(manual.scale);
+  });
+
+  it('never turns invalid focus bounds into the default 1000x1000 map', () => {
+    const rect = { x: 0, y: 60, width: 390, height: 280 };
+    expect(fitFocusBoundsCamera(null, rect, 16)).toBeNull();
+    expect(fitFocusBoundsCamera({ x: 0, y: 0, width: 0, height: 10 }, rect, 16)).toBeNull();
+    expect(fitFocusBoundsCamera({ x: Number.NaN, y: 0, width: 10, height: 10 }, rect, 16)).toBeNull();
   });
 });

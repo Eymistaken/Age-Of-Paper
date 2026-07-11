@@ -260,6 +260,8 @@ export function importSvgMap(svgText) {
   const mapDefinition = {
     version: 1,
     pricingVersion: PRICING_VERSION,
+    geometryVersion: 2,
+    boundsSpace: 'viewBox',
     importedAt: Date.now(),
     importer: usedLegacyInference ? 'legacy-svg-v3' : 'metadata-svg-v2',
     viewBox,
