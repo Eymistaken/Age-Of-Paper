@@ -509,6 +509,29 @@ describe('single-choice turn economy security rules', () => {
     expect(stored.players.host.money).toBe(0);
   });
 
+  it('allows a validated manifest-backed room to start with an empty legacy mapSvg', async () => {
+    const claiming = economyRoom();
+    const lobby = {
+      ...claiming,
+      phase: 'lobby', claims: {}, turnOrder: [], turnIndex: 0, turnNumber: 0, roundNumber: 0,
+      mapSvg: '',
+      mapManifest: {
+        version: 1, mapId: 'map_neutral', displayName: 'Neutral Map', revision: 1,
+        baseSvgHash: 'abc123', metadataHash: 'def456', metadataSchemaVersion: 1,
+        analysisAlgorithmVersion: 'terrain-grid-v1', mapDefinitionVersion: 1,
+      },
+      players: Object.fromEntries(Object.entries(claiming.players).map(([id, value]) => [id, {
+        ...value, money: 0, income: 5000, regionIds: [], lastIncomeTurn: 0,
+      }])),
+    };
+    await seed('START_MANIFEST', lobby);
+    await assertSucceeds(updateDoc(doc(context('host'), 'rooms', 'START_MANIFEST'), {
+      phase: 'claiming', players: lobby.players, claims: {}, turnOrder: ['host', 'a'],
+      turnIndex: 0, turnNumber: 1, roundNumber: 1,
+      lastAction: { type: 'start', actorId: 'host', turnNumber: 1, at: Timestamp.now() },
+    }));
+  });
+
   it('keeps an accepted player at zero money', async () => {
     const request = pendingRequest('new', ['a']);
     const room = roomData(['host', 'a'], { joinRequests: { new: request } });
@@ -615,16 +638,24 @@ describe('content addressed map asset security rules', () => {
     createdAt: Timestamp.now(), createdBy: 'host',
   };
 
+  const metadataAsset = {
+    kind: 'metadata', schemaVersion: 1, hash: 'def456', mapId: 'map_neutral', revision: 1,
+    metadata: { schemaVersion: 1 }, size: 19, createdAt: Timestamp.now(), createdBy: 'host',
+  };
+
   it('allows only the lobby host to write immutable hash assets and the manifest', async () => {
     const room = lobby();
     await seed('ASSET_HOST', room);
     await assertSucceeds(setDoc(doc(context('host'), 'rooms', 'ASSET_HOST', 'mapAssets', 'base_abc123'), baseAsset));
+    await assertSucceeds(setDoc(doc(context('host'), 'rooms', 'ASSET_HOST', 'mapAssets', 'metadata_def456'), metadataAsset));
     await assertSucceeds(updateDoc(doc(context('host'), 'rooms', 'ASSET_HOST'), {
       mapSvg: '', mapManifest: manifest, mapDefinition: room.mapDefinition, mapValidation: room.mapValidation,
     }));
 
     await seed('ASSET_MEMBER', room);
     await assertFails(setDoc(doc(context('a'), 'rooms', 'ASSET_MEMBER', 'mapAssets', 'base_abc123'), { ...baseAsset, createdBy: 'a' }));
+    await assertFails(setDoc(doc(context('a'), 'rooms', 'ASSET_MEMBER', 'mapAssets', 'metadata_def456'), { ...metadataAsset, createdBy: 'a' }));
+    await assertFails(setDoc(doc(context('outsider'), 'rooms', 'ASSET_MEMBER', 'mapAssets', 'metadata_def456'), { ...metadataAsset, createdBy: 'outsider' }));
     await assertFails(updateDoc(doc(context('a'), 'rooms', 'ASSET_MEMBER'), { mapSvg: '', mapManifest: manifest }));
 
     const started = { ...room, phase: 'claiming', turnOrder: ['host', 'a'], turnNumber: 1, roundNumber: 1 };
@@ -637,9 +668,12 @@ describe('content addressed map asset security rules', () => {
     await seed('ASSET_READ', room);
     await environment.withSecurityRulesDisabled(async (admin) => {
       await setDoc(doc(admin.firestore(), 'rooms', 'ASSET_READ', 'mapAssets', 'base_abc123'), baseAsset);
+      await setDoc(doc(admin.firestore(), 'rooms', 'ASSET_READ', 'mapAssets', 'metadata_def456'), metadataAsset);
     });
     await assertSucceeds(getDoc(doc(context('a'), 'rooms', 'ASSET_READ', 'mapAssets', 'base_abc123')));
+    await assertSucceeds(getDoc(doc(context('a'), 'rooms', 'ASSET_READ', 'mapAssets', 'metadata_def456')));
     await assertFails(getDoc(doc(context('outsider'), 'rooms', 'ASSET_READ', 'mapAssets', 'base_abc123')));
+    await assertFails(getDoc(doc(context('outsider'), 'rooms', 'ASSET_READ', 'mapAssets', 'metadata_def456')));
   });
 });
 

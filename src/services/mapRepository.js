@@ -31,9 +31,9 @@ class MemoryMapRepository {
     const previous = this.maps.get(record.mapId);
     const saved = {
       repositorySchemaVersion: DATABASE_VERSION,
-      createdAt: previous?.createdAt || record.createdAt || now,
       ...previous,
       ...structuredClone(record),
+      createdAt: previous?.createdAt || record.createdAt || now,
       updatedAt: record.updatedAt || now,
     };
     this.maps.set(saved.mapId, saved);
@@ -93,9 +93,9 @@ class IndexedDbMapRepository {
     const now = Date.now();
     const saved = {
       repositorySchemaVersion: DATABASE_VERSION,
-      createdAt: previous?.createdAt || record.createdAt || now,
       ...previous,
       ...record,
+      createdAt: previous?.createdAt || record.createdAt || now,
       updatedAt: record.updatedAt || now,
     };
     store.put(saved);

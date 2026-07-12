@@ -212,7 +212,7 @@ export const TerrainMapCanvas = forwardRef(function TerrainMapCanvas({
       pointer.kind = 'pan';
       capturePointer(event.currentTarget, event.pointerId);
       onGestureChange?.(true);
-    } else if (pointer.kind === 'press-marquee' && distance > threshold) {
+    } else if ((pointer.kind === 'press-marquee' || pointer.kind === 'press-select') && distance > threshold) {
       pointer.kind = 'marquee';
       capturePointer(event.currentTarget, event.pointerId);
       onGestureChange?.(true);
@@ -225,7 +225,7 @@ export const TerrainMapCanvas = forwardRef(function TerrainMapCanvas({
       pointer.lastClient = { x: event.clientX, y: event.clientY };
     } else if (pointer.kind === 'marquee') {
       const rect = normalizedRect(pointer.startWorld, worldPoint(event));
-      const ids = surfacesIntersectingMarquee(record.terrainDocument.surfaces, rect);
+      const ids = surfacesIntersectingMarquee(record.terrainDocument.surfaces, rect, world);
       setMarquee({ rect, ids });
     }
   };

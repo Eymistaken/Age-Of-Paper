@@ -157,15 +157,17 @@ Lobby evresinde doğrudan katılım sürer ve oda kapasitesi 10 oyuncudur. `clai
 
 Güncel host isteği tek başına kabul veya tamamen ret edebilir. Host cevap vermezse, istek oluşturulduğunda snapshot alınan host dışı seçmenlerin hâlâ odada bulunanlarının tamamı kabul ettiğinde istek kabul edilir; boş seçmen kümesi otomatik kabul değildir. Kabul transaction’ı kapasiteyi, evreyi ve tarafsız bölgeyi yeniden doğrular; yeni oyuncuyu sıfır para ve bölgeyle sıra sonuna ekler, mevcut tur/round alanlarını değiştirmez. Terminal istekler host tarafından temizlenir ve oda belgesinin büyümesi sınırlandırılır.
 
-SVG yükleme alanı aynı sanitization, pricing ve validation hattını kullanan dosya seçici ile sürükle–bırak davranışını birlikte sunar. Tek `.svg` dosyası kabul edilir ve dosya boyutu 600 KB ile sınırlıdır.
+SVG yükleme alanı aynı sanitization, pricing ve validation hattını kullanan dosya seçici ile sürükle–bırak davranışını birlikte sunar. Tek `.svg` dosyası kabul edilir; untrusted dosya için mutlak sınır 1 MB, ayrıştırılmış temel room SVG asset’i için sınır 650 KB’dir.
 
 ## Akıllı terrain hazırlık masası
 
 Kurucu bir SVG yüklediğinde dosya artık doğrudan odaya yazılmaz. Root SVG `viewBox` koordinatlarında çalışan hazırlık hattı açık metadata ve `data-terrain` ipuçlarını doğrular; kalan yüzeyleri semantik, geometri ve zayıf renk ipuçlarıyla `land`, `ocean`, `lake` veya `ignored` olarak sınıflandırır. Çizimde su yoksa negatif alan deterministik bileşenlere ayrılır; dış sınıra ulaşan bileşen okyanus, kapalı bileşen göl olur. Kıyı, final kara-su temasından türetilir ve kıyı kara bölgeleri varsayılan olarak limana izin verir.
 
-Tam ekran “Harita Hazırlık Masası” masaüstü ve mobilde Hand/Select/Brush araçlarını, kalıcı Ctrl seçimini, viewBox marquee seçimini, sınır/iç alan analizini, toplu override önizlemesini, port iznini ve `Ctrl+Z`/`Ctrl+Y` history’sini sunar. Editör değişiklikleri kısa debounce ile IndexedDB’ye kaydeder; odaya yalnız açık “Odaya Uygula” emriyle atomik olarak yazılır. “Son Haritalar” arşivi yükleme yapmadan düzenleme, kullanma, dışa aktarma, çoğaltma ve onaylı silme işlemlerini sağlar.
+Tam ekran “Harita Hazırlık Masası” masaüstü ve mobilde Hand/Select/Brush araçlarını, standart tıklamayla selection replacement’ı, kalıcı Ctrl toggle seçimini, yüzey üzerinde de başlayabilen viewBox marquee seçimini, sınır/iç alan analizini, toplu override önizlemesini, port iznini ve `Ctrl+Z`/`Ctrl+Y` history’sini sunar. Arazi Analizi confidence/source/classification işlerini; Kıyılar ve Limanlar ise su teması, uygun kıyılar ve liman izinlerini ayrı görünüm olarak yönetir.
 
-Hazırlanan SVG, güvenli ve sürümlü `<metadata id="age-of-paper-map">` JSON kaydı içerir; dosya adı metadata tespitinde kullanılmaz. Aynı `mapId` ve geometri-hash uyuşmazlıkları sessizce uygulanmaz. Ayrıntılı sözleşme ve nötr örnekler için [`docs/metadata.md`](docs/metadata.md) dosyasına bakın.
+Bir mantıksal değişiklik en fazla bir 650 ms debounce IndexedDB upsert’i üretir. Durum `Kaydedilmemiş değişiklikler` → `Kaydediliyor…` → `Yerel olarak kaydedildi` olarak ilerler; recoverable failure bellekte korunur ve görünür `Yerel Kaydet` düğmesi anında flush eder. `mapId` ve `createdAt` edit/save/close/reopen boyunca sabittir. Değişmemiş editörü kapatmak yazma yapmaz; yalnız “Odaya Uygula” content-addressed asset ve manifest transaction’ını başlatabilir. “Son Haritalar” güvenilen kaydı yeniden upload gibi parse etmeden açar.
+
+Hazırlanan SVG, güvenli, kompakt ve sürümlü `<metadata id="age-of-paper-map">` JSON kaydı içerir; dosya adı metadata tespitinde kullanılmaz. Büyük tekrar üretilebilir boundary/grid ayrıntıları IndexedDB’de kalır. Aynı `mapId`, geçersiz metadata ve geometri-hash uyuşmazlıkları sessizce yeni haritaya dönüştürülmez. Ayrıntılı sözleşme ve nötr örnekler için [`docs/metadata.md`](docs/metadata.md) dosyasına bakın.
 
 ### Content-addressed oda harita asset’leri
 

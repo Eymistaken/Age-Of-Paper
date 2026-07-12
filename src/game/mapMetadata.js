@@ -218,12 +218,14 @@ export function validateMetadataPackage(metadata, { elementIds } = {}) {
 export function embedMapMetadata(svgText, metadata) {
   const validation = validateMetadataPackage(metadata);
   if (!validation.valid) throw new Error(validation.errors[0].message);
+  const serialized = canonicalJson(metadata);
+  if (serialized.length > MAX_METADATA_CHARACTERS) throw new Error('Metadata izin verilen boyutu aşıyor.');
   const document = parseSvg(svgText);
   document.getElementById(METADATA_ID)?.remove();
   const node = document.createElementNS(SVG_NS, 'metadata');
   node.setAttribute('id', METADATA_ID);
   node.setAttribute('data-aop-schema-version', String(METADATA_SCHEMA_VERSION));
-  node.textContent = canonicalJson(metadata);
+  node.textContent = serialized;
   document.documentElement.insertBefore(node, document.documentElement.firstChild);
   return new XMLSerializer().serializeToString(document.documentElement);
 }

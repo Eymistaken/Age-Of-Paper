@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { prepareSvgMap, sanitizeSvgMarkup } from '../game/mapImporter';
+import { rebuildPreparedMap, sanitizeSvgMarkup, validatePreparedMapRecord } from '../game/mapImporter';
 
 function safePreview(record) {
   try { return sanitizeSvgMarkup(record.thumbnail || record.sanitizedSvg || record.baseSvg || '<svg/>'); }
@@ -59,10 +59,8 @@ export function RecentMaps({ repository, onEdit, onUse, refreshToken = 0 }) {
     setBusyId(record.mapId);
     setError('');
     try {
-      const exportRecord = await prepareSvgMap(record.preparedSvg || record.sanitizedSvg, {
-        displayName: record.displayName,
-        sourceLabel: record.sourceLabel,
-      });
+      validatePreparedMapRecord(record);
+      const exportRecord = await rebuildPreparedMap(record, record.terrainDocument);
       await repository.savePreparedMap(exportRecord);
       await refresh();
       downloadMap(exportRecord);

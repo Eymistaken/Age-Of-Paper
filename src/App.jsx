@@ -9,7 +9,7 @@ import { JoinRequestWaiting } from './components/JoinRequestWaiting';
 import { WaitingRoom } from './components/WaitingRoom';
 import { MapImportConflictDialog } from './components/MapImportConflictDialog';
 import { TerrainMapEditor } from './components/TerrainMapEditor';
-import { MapMetadataConflictError, prepareSvgMap, rebuildPreparedMap } from './game/mapImporter';
+import { MapMetadataConflictError, prepareSvgMap, rebuildPreparedMap, validatePreparedMapRecord } from './game/mapImporter';
 import { deriveTerrainDocument } from './game/terrainModel';
 import { readSvgFile } from './game/svgUpload';
 import { PHASES, resolvePhase } from './game/phases';
@@ -427,12 +427,8 @@ function App() {
     setLoading(true);
     setError('');
     try {
-      const verified = await prepareSvgMap(record.preparedSvg || record.sanitizedSvg, {
-        displayName: record.displayName,
-        sourceLabel: record.sourceLabel,
-      });
-      await mapRepository.savePreparedMap({ ...verified, createdAt: record.createdAt, sourceLabel: record.sourceLabel });
-      setEditorRecord(verified);
+      validatePreparedMapRecord(record);
+      setEditorRecord(record);
     } catch (openError) {
       setError(`Yerel harita doğrulanamadı: ${openError.message}`);
     } finally {
@@ -461,14 +457,15 @@ function App() {
   };
 
   const applyPreparedMap = async (record, closeEditor = true) => {
-    if (!user) return;
+    if (!user) return null;
     setLoading(true);
     setError('');
     try {
       await setRoomMap(roomCode, user.uid, record);
-      await mapRepository.savePreparedMap({ ...record, appliedToRoom: true, sourceLabel: `Oda ${roomCode}`, updatedAt: Date.now() });
+      const saved = await mapRepository.savePreparedMap({ ...record, appliedToRoom: true, sourceLabel: `Oda ${roomCode}`, updatedAt: Date.now() });
       setRecentMapsRevision((value) => value + 1);
       if (closeEditor) setEditorRecord(null);
+      return saved;
     } catch (applyError) {
       setError(applyError.message);
       throw applyError;
@@ -600,7 +597,7 @@ function App() {
         cancelMapAnalysis={() => analysisAbortRef.current?.abort()}
         roomAssetState={roomAssetState}
       />
-      {editorRecord && mapRepository && <TerrainMapEditor initialRecord={editorRecord} repository={mapRepository} onApply={(record) => applyPreparedMap(record, false)} onClose={() => setEditorRecord(null)} onDraftChange={(next) => { setEditorRecord(next); setRecentMapsRevision((value) => value + 1); }} />}
+      {editorRecord && mapRepository && <TerrainMapEditor initialRecord={editorRecord} repository={mapRepository} onApply={(record) => applyPreparedMap(record, false)} onClose={() => setEditorRecord(null)} onDraftChange={() => setRecentMapsRevision((value) => value + 1)} />}
       {importConflict && <MapImportConflictDialog conflict={importConflict} onChoice={resolveImportConflict} />}
     </>);
   }

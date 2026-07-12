@@ -475,6 +475,10 @@
 .aop-surface-facts dl,.aop-port-permission dl { display: grid; gap: 1px; margin: 0; }
 .aop-surface-facts dl div,.aop-port-permission dl div { display: grid; grid-template-columns: 42% 58%; padding: 6px 0; border-bottom: 1px solid var(--aop-line); }
 .aop-surface-facts dt,.aop-port-permission dt { color: var(--aop-muted); font-size: .62rem; }.aop-surface-facts dd,.aop-port-permission dd { margin: 0; overflow-wrap: anywhere; color: var(--aop-paper-light); font-size: .67rem; }
+.aop-analysis-review p,.aop-coastal-eligibility p { margin: 0; color: var(--aop-muted); font-size: .67rem; line-height: 1.45; }
+.aop-analysis-review ul,.aop-coastal-eligibility ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.aop-analysis-review li,.aop-coastal-eligibility li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 7px; border-left: 2px solid var(--aop-bronze); background: rgba(255,255,255,.025); color: var(--aop-paper-light); font-size: .64rem; }
+.aop-coastal-eligibility li strong { color: var(--aop-gold); font-size: .59rem; }
 .aop-boundary-panel p,.aop-boundary-result p { margin: 0; color: var(--aop-muted); font-size: .68rem; line-height: 1.45; }
 .aop-boundary-result { display: grid; gap: 8px; padding: 9px; border: 1px solid var(--aop-line); }
 .aop-boundary-result.is-valid { border-color: var(--aop-success); }.aop-boundary-result.is-invalid { border-color: var(--aop-danger); }
@@ -503,10 +507,11 @@
 @media (max-width: 900px) {
   .aop-terrain-editor { grid-template-rows: auto minmax(0,1fr); }
   .aop-terrain-editor-header { position: sticky; top: 0; grid-template-columns: minmax(0,1fr) auto; gap: 7px; padding-bottom: 7px; }
-  .aop-editor-save-state { display: none; }
+  .aop-editor-save-state { grid-column: 1 / -1; display: flex; min-width: 0; flex-direction: row; gap: 8px; text-align: left; }
   .aop-editor-header-actions button span,.aop-editor-header-actions button:nth-child(2) { display: none; }
   .aop-editor-header-actions button { min-width: 42px; padding: 5px 7px; }
-  .aop-editor-header-actions button:nth-child(3) { display: none; }
+  .aop-editor-header-actions button:nth-child(4),.aop-editor-header-actions button:nth-child(5) { display: none; }
+  .aop-editor-header-actions .aop-local-save-button { display: inline-flex; align-items: center; }
   .aop-editor-header-actions button.is-primary { max-width: 90px; font-size: .58rem; }
   .aop-terrain-editor-body { grid-template-columns: 1fr; grid-template-rows: minmax(0,1fr) 58px; }
   .aop-editor-map-stage { grid-row: 1; }

@@ -293,6 +293,27 @@ function newMapId() {
   return `map_${normalizeRegionId(random, 'local')}`;
 }
 
+export function validatePreparedMapRecord(record) {
+  if (!record || typeof record !== 'object') throw new Error('Yerel harita kaydı geçersiz.');
+  if (typeof record.mapId !== 'string' || !record.mapId) throw new Error('Yerel harita kimliği geçersiz.');
+  if (!record.terrainDocument || record.terrainDocument.mapId !== record.mapId) {
+    throw new Error('Yerel harita kimliği terrain belgesiyle eşleşmiyor.');
+  }
+  if (!Array.isArray(record.terrainDocument.surfaces) || !record.terrainDocument.surfaces.length) {
+    throw new Error('Yerel harita terrain yüzeyleri eksik.');
+  }
+  if (record.compactMetadata?.mapId && record.compactMetadata.mapId !== record.mapId) {
+    throw new Error('Yerel harita kimliği metadata ile eşleşmiyor.');
+  }
+  if (record.fullMetadata?.mapId && record.fullMetadata.mapId !== record.mapId) {
+    throw new Error('Yerel harita kimliği tam metadata ile eşleşmiyor.');
+  }
+  const validation = validateMapDefinition(record.mapDefinition);
+  if (!validation.valid) throw new Error(validation.errors[0]?.message || 'Yerel harita oyun tanımı geçersiz.');
+  if (typeof record.baseSvg !== 'string' || !record.baseSvg.trim()) throw new Error('Yerel haritanın temel SVG kaydı eksik.');
+  return record;
+}
+
 /**
  * Builds the full local editor record. This API is async because hashing and
  * negative-space analysis intentionally yield between expensive phases.
@@ -313,6 +334,13 @@ export async function prepareSvgMap(svgText, options = {}) {
   const originalSvg = String(svgText || '');
   const sanitizedOriginal = sanitizeSvgMarkup(originalSvg);
   const extracted = extractMapMetadata(sanitizedOriginal);
+  if (extracted.found && !extracted.valid) {
+    throw new MapMetadataConflictError(
+      extracted.errors[0]?.message || 'Age of Paper metadata kaydı geçersiz.',
+      'INVALID_EDITOR_METADATA',
+      { errors: extracted.errors },
+    );
+  }
   const baseSvg = stripEditorMetadata(sanitizedOriginal);
   const baseSvgHash = await hashText(baseSvg);
   let terrainDocument;
@@ -350,9 +378,14 @@ export async function prepareSvgMap(svgText, options = {}) {
           surfaces: regenerated.surfaces.map((surface) => importedById[surface.id]
             ? {
               ...surface,
+              name: importedById[surface.id].name,
               metadataTerrainType: importedById[surface.id].metadataTerrainType,
               hostOverride: importedById[surface.id].hostOverride,
               portPreference: importedById[surface.id].portPreference,
+              claimNeighborIds: importedById[surface.id].claimNeighborIds,
+              landNeighborIds: importedById[surface.id].landNeighborIds,
+              price: importedById[surface.id].price,
+              income: importedById[surface.id].income,
             }
             : surface),
         });
@@ -413,7 +446,7 @@ export async function prepareSvgMap(svgText, options = {}) {
   const compactMetadata = createMetadataPackage(terrainDocument, { compact: true });
   const metadataHash = await hashText(canonicalJson(compactMetadata));
   const composedSvg = applyCompactMetadataToSvg(baseSvg, compactMetadata);
-  const preparedSvg = embedMapMetadata(composedSvg, fullMetadata);
+  const preparedSvg = embedMapMetadata(composedSvg, compactMetadata);
   return {
     mapId: terrainDocument.mapId,
     displayName: terrainDocument.displayName,
@@ -483,7 +516,7 @@ export async function rebuildPreparedMap(preparedMap, nextTerrainDocument, optio
     compactMetadata,
     metadataHash,
     sanitizedSvg,
-    preparedSvg: embedMapMetadata(sanitizedSvg, fullMetadata),
+    preparedSvg: embedMapMetadata(sanitizedSvg, compactMetadata),
     thumbnail: sanitizedSvg,
   };
 }

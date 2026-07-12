@@ -48,6 +48,9 @@ export function TerrainInspector({
   const [outsideTerrain, setOutsideTerrain] = useState('land');
   const selected = document.surfacesById[inspectedId] || document.surfacesById[selectedIds.at(-1)];
   const selectedSurfaces = useMemo(() => selectedIds.map((id) => document.surfacesById[id]).filter(Boolean), [document, selectedIds]);
+  const lowConfidence = useMemo(() => document.surfaces.filter((surface) => surface.classificationSource === 'automatic' && surface.confidence < 0.65), [document]);
+  const coastalLands = useMemo(() => document.surfaces.filter((surface) => surface.terrainType === 'land' && surface.coastType !== 'none'), [document]);
+  const disabledPorts = useMemo(() => coastalLands.filter((surface) => !surface.portAllowed), [coastalLands]);
 
   return (
     <aside className="aop-terrain-inspector" aria-label="Harita düzenleyici denetçisi">
@@ -68,6 +71,11 @@ export function TerrainInspector({
             </div>
           </section>
           <TerrainLegend />
+          <section className="aop-analysis-review">
+            <div className="aop-label">Düşük güvenli yüzeyler</div>
+            <p><strong>{lowConfidence.length}</strong> otomatik sonuç inceleme eşiğinin altında.</p>
+            {lowConfidence.length > 0 && <ul>{lowConfidence.slice(0, 8).map((surface) => <li key={surface.id}>{surface.name} · %{Math.round(surface.confidence * 100)}</li>)}</ul>}
+          </section>
           <section>
             <div className="aop-label">Seçimi Sınıflandır</div>
             <div className="aop-terrain-choice-grid">
@@ -79,7 +87,7 @@ export function TerrainInspector({
               Otomatik sonuca dön
             </button>
           </section>
-          {selected ? <SurfaceFacts surface={selected} document={document} /> : <p className="aop-inspector-empty">Ayrıntıları görmek için bir yüzey seç.</p>}
+          {selected ? <AnalysisFacts surface={selected} document={document} /> : <p className="aop-inspector-empty">Analiz ayrıntıları için bir yüzey seç. Düşük güvenli sonuçları haritadaki tarama deseniyle de ayırt edebilirsin.</p>}
           {selectedIds.length > 0 && (
             <section className="aop-boundary-panel">
               <div className="aop-label">Kalıcı Seçim</div>
@@ -124,14 +132,19 @@ export function TerrainInspector({
             <div className="aop-terrain-summary-grid">
               <span><strong>{document.summary.coastalLandCount}</strong>Kıyı kara</span>
               <span><strong>{document.summary.portAllowedCount}</strong>Liman izni</span>
+              <span><strong>{disabledPorts.length}</strong>Devre dışı</span>
             </div>
           </section>
-          <TerrainLegend />
-          {selected ? (
+          <section className="aop-coastal-eligibility">
+            <div className="aop-label">Liman kurulabilir kıyılar</div>
+            {coastalLands.length ? <ul>{coastalLands.map((surface) => <li key={surface.id}><span>{surface.name}</span><strong>{surface.portAllowed ? 'İzinli' : 'Devre dışı'}</strong></li>)}</ul> : <p>Final terrain verisinde kıyı kara yüzeyi yok.</p>}
+            {disabledPorts.length > 0 && <p className="aop-validation-note is-warning">{disabledPorts.length} kıyı kara yüzeyinde liman izni kurucu tarafından devre dışı bırakılmış.</p>}
+          </section>
+          {selected?.terrainType === 'land' ? (
             <section className="aop-port-permission">
-              <div className="aop-label">Seçili Yüzey</div>
+              <div className="aop-label">Seçili kıyı karası</div>
               <h3>{selected.name}</h3>
-              <dl><div><dt>Kıyı türü</dt><dd>{COAST_LABELS[selected.coastType]}</dd></div><div><dt>Liman izni</dt><dd>{selected.portAllowed ? 'Açık' : 'Kapalı'}</dd></div></dl>
+              <CoastFacts surface={selected} document={document} />
               <label className="aop-check-row">
                 <input
                   type="checkbox"
@@ -142,8 +155,9 @@ export function TerrainInspector({
                 Bu kıyıda liman kurulabilir
               </label>
               {selected.terrainType === 'land' && selected.coastType === 'none' && <p className="aop-validation-note">İç bölgeler liman kurulabilir olarak işaretlenemez.</p>}
+              {selected.coastType !== 'none' && !selected.portAllowed && <p className="aop-validation-note is-warning">Liman izni devre dışı. Bu kıyıda yeni liman kurulamaz.</p>}
             </section>
-          ) : <p className="aop-inspector-empty">Kıyı ve liman iznini görmek için bir yüzey seç.</p>}
+          ) : <p className="aop-inspector-empty">Kıyı ayrıntıları için bir kara yüzeyi seç. Su ve yoksayılan yüzeylerde liman izni bulunmaz.</p>}
           {document.invalidatedCompatibilityRoutes?.length > 0 && <p className="aop-validation-note is-warning">{document.invalidatedCompatibilityRoutes.length} eski deniz rotası terrain değişikliği nedeniyle geçersiz.</p>}
         </div>
       )}
@@ -151,7 +165,7 @@ export function TerrainInspector({
   );
 }
 
-function SurfaceFacts({ surface, document }) {
+function AnalysisFacts({ surface, document }) {
   const adjacent = surface.adjacentSurfaceIds.map((id) => document.surfacesById[id]).filter(Boolean);
   const adjacentLand = adjacent.filter((item) => item.terrainType === 'land');
   const adjacentWater = adjacent.filter((item) => item.terrainType === 'ocean' || item.terrainType === 'lake');
@@ -162,12 +176,27 @@ function SurfaceFacts({ surface, document }) {
       <dl>
         <div><dt>Nihai tür</dt><dd>{TERRAIN_LABELS[surface.terrainType]}</dd></div>
         <div><dt>Otomatik tahmin</dt><dd>{TERRAIN_LABELS[surface.automatic.terrainType]} · %{Math.round(surface.automatic.confidence * 100)}</dd></div>
+        <div><dt>Güven</dt><dd>%{Math.round(surface.confidence * 100)}{surface.confidence < 0.65 ? ' · İnceleme önerilir' : ''}</dd></div>
         {surface.metadataTerrainType && <div><dt>Metadata tahmini</dt><dd>{TERRAIN_LABELS[surface.metadataTerrainType]}</dd></div>}
-        <div><dt>Kaynak</dt><dd>{SOURCE_LABELS[surface.classificationSource]}</dd></div>
-        <div><dt>Kıyı</dt><dd>{COAST_LABELS[surface.coastType]}</dd></div>
-        <div><dt>Kara komşular</dt><dd>{adjacentLand.length ? adjacentLand.map((item) => item.name).join(', ') : 'Yok'}</dd></div>
-        <div><dt>Su komşular</dt><dd>{adjacentWater.length ? adjacentWater.map((item) => item.name).join(', ') : 'Yok'}</dd></div>
+        <div><dt>Sınıflandırma kaynağı</dt><dd>{SOURCE_LABELS[surface.classificationSource]}</dd></div>
+        <div><dt>Komşu kara</dt><dd>{adjacentLand.length ? adjacentLand.map((item) => item.name).join(', ') : 'Yok'}</dd></div>
+        <div><dt>Komşu su</dt><dd>{adjacentWater.length ? adjacentWater.map((item) => item.name).join(', ') : 'Yok'}</dd></div>
       </dl>
     </section>
+  );
+}
+
+function CoastFacts({ surface, document }) {
+  const touchingWater = surface.adjacentSurfaceIds
+    .map((id) => document.surfacesById[id])
+    .filter((candidate) => candidate?.terrainType === 'ocean' || candidate?.terrainType === 'lake');
+  const eligible = surface.terrainType === 'land' && surface.coastType !== 'none';
+  return (
+    <dl>
+      <div><dt>Kıyı türü</dt><dd>{COAST_LABELS[surface.coastType]}</dd></div>
+      <div><dt>Temas eden su</dt><dd>{touchingWater.length ? touchingWater.map((item) => `${item.name} (${TERRAIN_LABELS[item.terrainType]})`).join(', ') : 'Yok'}</dd></div>
+      <div><dt>Liman uygunluğu</dt><dd>{eligible ? 'Kıyı kara — değiştirilebilir' : 'Uygun değil'}</dd></div>
+      <div><dt>Liman izni</dt><dd>{surface.portAllowed ? 'Açık' : 'Devre dışı'}</dd></div>
+    </dl>
   );
 }

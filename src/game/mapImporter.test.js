@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { importSvgMap, prepareSvgMap } from './mapImporter';
+import { importSvgMap, prepareSvgMap, rebuildPreparedMap, validatePreparedMapRecord } from './mapImporter';
 import { stripEditorMetadata } from './mapMetadata';
+import { readSvgFile } from './svgUpload';
 
 describe('SVG map importer', () => {
   it('prefers explicit regions, removes decoration and sanitizes unsafe content', () => {
@@ -115,6 +116,48 @@ describe('SVG map importer', () => {
     }))).toEqual(prepared.terrainDocument.surfaces.map((surface) => ({
       id: surface.id, terrainType: surface.terrainType, coastType: surface.coastType, portAllowed: surface.portAllowed,
     })));
+  });
+
+  it('preserves identity, host overrides, derived coasts and port permissions through export and reimport', async () => {
+    const prepared = await prepareSvgMap(`<svg viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">
+      <rect id="land_a" data-terrain="land" width="50" height="50"/>
+      <rect id="water_1" data-terrain="ocean" x="50" width="50" height="50"/>
+    </svg>`, { displayName: 'Override Round Trip' });
+    const edited = await rebuildPreparedMap(prepared, {
+      ...prepared.terrainDocument,
+      surfaces: prepared.terrainDocument.surfaces.map((surface) => surface.id === 'land_a'
+        ? { ...surface, hostOverride: 'land', portPreference: false }
+        : surface),
+    });
+    const reimported = await prepareSvgMap(edited.preparedSvg);
+    expect(reimported.mapId).toBe(edited.mapId);
+    expect(reimported.terrainDocument.surfacesById.land_a).toMatchObject({
+      terrainType: 'land', hostOverride: 'land', coastType: 'ocean', portAllowed: false, portPreference: false,
+    });
+  });
+
+  it('uses compact export metadata so a near-limit source can be imported by the same version', async () => {
+    const filler = 'x'.repeat(599_000);
+    const prepared = await prepareSvgMap(`<svg viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg"><!--${filler}--><rect id="land_a" data-terrain="land" width="50" height="50"/><rect id="water_1" data-terrain="ocean" x="50" width="50" height="50"/></svg>`);
+    expect(prepared.preparedSvg.length).toBeGreaterThan(600_000);
+    const importedText = await readSvgFile({
+      name: 'near_limit_ageofpaper.svg', type: 'image/svg+xml', size: prepared.preparedSvg.length,
+      text: async () => prepared.preparedSvg,
+    });
+    const reimported = await prepareSvgMap(importedText);
+    expect(reimported.mapId).toBe(prepared.mapId);
+    expect(reimported.mapDefinition).toEqual(prepared.mapDefinition);
+  });
+
+  it('rejects an invalid trusted repository record without generating a replacement identity', () => {
+    const invalid = { mapId: 'map_stable', terrainDocument: { mapId: 'map_other' }, preparedSvg: '<svg/>' };
+    expect(() => validatePreparedMapRecord(invalid)).toThrow('kimliği');
+    expect(invalid.mapId).toBe('map_stable');
+  });
+
+  it('rejects invalid embedded editor metadata instead of silently analyzing a new mapId', async () => {
+    const invalid = '<svg viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><metadata id="age-of-paper-map">{"schemaVersion":1}</metadata><rect id="land_a" width="10" height="10"/></svg>';
+    await expect(prepareSvgMap(invalid)).rejects.toMatchObject({ code: 'INVALID_EDITOR_METADATA' });
   });
 
   it('keeps automatic economy non-zero when prepared SVG regions omit price metadata', async () => {

@@ -33,6 +33,12 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
   const canvasRef = useRef(null);
   const saveTimerRef = useRef(null);
   const latestRecordRef = useRef(initialRecord);
+  const latestDocumentRef = useRef(initialRecord.terrainDocument);
+  const lastSavedDocumentRef = useRef(initialRecord.terrainDocument);
+  const savePromiseRef = useRef(null);
+  const saveTargetRef = useRef(null);
+  const localDirtyRef = useRef(false);
+  const onDraftChangeRef = useRef(onDraftChange);
   const [record, setRecord] = useState(initialRecord);
   const [history, setHistory] = useState(() => createHistory(initialRecord.terrainDocument));
   const [selectedIds, setSelectedIds] = useState([]);
@@ -42,7 +48,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
   const [brushMode, setBrushMode] = useState('add');
   const [viewMode, setViewMode] = useState('final');
   const [zoom, setZoom] = useState(1);
-  const [saveStatus, setSaveStatus] = useState('Kaydedildi — yerel');
+  const [saveStatus, setSaveStatus] = useState('Yerel olarak kaydedildi');
   const [dirtyRoom, setDirtyRoom] = useState(initialRecord.appliedToRoom !== true);
   const [activeGesture, setActiveGesture] = useState(false);
   const [boundaryPreview, setBoundaryPreview] = useState(null);
@@ -56,6 +62,8 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
   const editorDocument = history.present;
   const previewDocument = batchPreview?.document || editorDocument;
   latestRecordRef.current = record;
+  latestDocumentRef.current = editorDocument;
+  onDraftChangeRef.current = onDraftChange;
   const currentValidation = useMemo(() => validateMapDefinition(buildCompatibilityMapDefinition(editorDocument)), [editorDocument]);
 
   useEffect(() => setDisplayName(editorDocument.displayName || record.displayName), [editorDocument.displayName, record.displayName]);
@@ -69,31 +77,63 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
     return { ...record, terrainDocument: automatic };
   }, [previewDocument, record, viewMode]);
 
-  const persist = useCallback(async (nextDocument = editorDocument) => {
-    setSaveStatus('Kaydediliyor…');
-    try {
-      const rebuilt = await rebuildPreparedMap(latestRecordRef.current, nextDocument, { displayName: nextDocument.displayName });
-      await repository.savePreparedMap(rebuilt);
-      latestRecordRef.current = rebuilt;
-      setRecord(rebuilt);
-      setSaveStatus('Kaydedildi — yerel');
-      onDraftChange?.(rebuilt);
-      return rebuilt;
-    } catch (error) {
-      setSaveStatus('Yerel kayıt başarısız');
-      setFeedback(error?.name === 'QuotaExceededError'
-        ? 'Tarayıcı depolama kotası dolu. Aktif taslak bellekte korunuyor.'
-        : `Yerel kayıt başarısız: ${error.message}`);
-      throw error;
+  const flushDraft = useCallback(async () => {
+    window.clearTimeout(saveTimerRef.current);
+    if (savePromiseRef.current) {
+      try { await savePromiseRef.current; } catch { /* A newer retry may follow a failed write. */ }
     }
-  }, [editorDocument, onDraftChange, repository]);
+    const nextDocument = latestDocumentRef.current;
+    if (!localDirtyRef.current && lastSavedDocumentRef.current === nextDocument) return latestRecordRef.current;
+    if (savePromiseRef.current && saveTargetRef.current === nextDocument) return savePromiseRef.current;
+    setSaveStatus('Kaydediliyor…');
+    saveTargetRef.current = nextDocument;
+    const operation = (async () => {
+      const rebuilt = await rebuildPreparedMap(latestRecordRef.current, nextDocument, { displayName: nextDocument.displayName });
+      const saved = await repository.savePreparedMap(rebuilt);
+      latestRecordRef.current = saved;
+      lastSavedDocumentRef.current = nextDocument;
+      if (latestDocumentRef.current === nextDocument) {
+        localDirtyRef.current = false;
+        setSaveStatus('Yerel olarak kaydedildi');
+      } else {
+        localDirtyRef.current = true;
+        setSaveStatus('Kaydedilmemiş değişiklikler');
+      }
+      setRecord(saved);
+      setFeedback((current) => /Yerel kayıt|Tarayıcı depolama/.test(current) ? '' : current);
+      onDraftChangeRef.current?.(saved);
+      return saved;
+    })();
+    savePromiseRef.current = operation;
+    try {
+      return await operation;
+    } catch (error) {
+      localDirtyRef.current = true;
+      setSaveStatus('Yerel kayıt başarısız — yeniden deneyin');
+      setFeedback(error?.name === 'QuotaExceededError'
+        ? 'Tarayıcı depolama kotası dolu. Aktif taslak bellekte korunuyor; alan açıp “Yerel Kaydet” ile yeniden dene.'
+        : `Yerel kayıt başarısız: ${error.message}. “Yerel Kaydet” ile yeniden deneyebilirsin.`);
+      throw error;
+    } finally {
+      if (savePromiseRef.current === operation) {
+        savePromiseRef.current = null;
+        saveTargetRef.current = null;
+      }
+    }
+  }, [repository]);
 
   useEffect(() => {
     window.clearTimeout(saveTimerRef.current);
-    setSaveStatus('Kaydediliyor…');
-    saveTimerRef.current = window.setTimeout(() => persist(history.present).catch(() => {}), 650);
+    if (history.present === lastSavedDocumentRef.current && !savePromiseRef.current) {
+      localDirtyRef.current = false;
+      setSaveStatus('Yerel olarak kaydedildi');
+      return undefined;
+    }
+    localDirtyRef.current = true;
+    setSaveStatus('Kaydedilmemiş değişiklikler');
+    saveTimerRef.current = window.setTimeout(() => flushDraft().catch(() => {}), 650);
     return () => window.clearTimeout(saveTimerRef.current);
-  }, [history.present, persist]);
+  }, [flushDraft, history.present]);
 
   const commitDocument = (next, label) => {
     setHistory((current) => executeCommand(current, deriveTerrainDocument(next), label));
@@ -105,13 +145,15 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
   const requestClose = useCallback(async () => {
     if (pending) return;
     window.clearTimeout(saveTimerRef.current);
-    try { await persist(history.present); } catch {
-      setFeedback('Yerel taslak güvenle kaydedilemediği için editör açık tutuluyor. Depolama alanını boşaltıp yeniden dene veya SVG dışa aktar.');
-      return;
+    if (localDirtyRef.current || savePromiseRef.current) {
+      try { await flushDraft(); } catch {
+        setFeedback('Yerel taslak güvenle kaydedilemediği için editör açık tutuluyor. Depolama alanını boşaltıp “Yerel Kaydet” ile yeniden dene veya SVG dışa aktar.');
+        return;
+      }
     }
     if (dirtyRoom && !window.confirm('Yerel taslak kaydedildi ancak odaya uygulanmadı. Editörü kapatmak istiyor musun?')) return;
     onClose();
-  }, [dirtyRoom, history.present, onClose, pending, persist]);
+  }, [dirtyRoom, flushDraft, onClose, pending]);
 
   useEffect(() => {
     const returnFocus = document.activeElement;
@@ -239,14 +281,15 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
     setPending(true);
     setFeedback('');
     try {
-      const local = await persist(editorDocument);
+      const local = await flushDraft();
       const applied = await rebuildPreparedMap(local, editorDocument, { bumpRevision: true, displayName });
-      await onApply(applied);
-      await repository.savePreparedMap({ ...applied, appliedToRoom: true });
-      latestRecordRef.current = applied;
-      setRecord(applied);
+      const saved = await onApply(applied) || { ...applied, appliedToRoom: true };
+      latestRecordRef.current = saved;
+      lastSavedDocumentRef.current = editorDocument;
+      localDirtyRef.current = false;
+      setRecord(saved);
       setDirtyRoom(false);
-      setSaveStatus('Kaydedildi — odaya uygulandı');
+      setSaveStatus('Yerel olarak kaydedildi');
     } catch (error) {
       setFeedback(error.message || 'Harita odaya uygulanamadı.');
     } finally {
@@ -258,15 +301,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
     if (pending) return;
     setPending(true);
     try {
-      const latest = await rebuildPreparedMap(latestRecordRef.current, editorDocument, { displayName });
-      try {
-        await repository.savePreparedMap(latest);
-        latestRecordRef.current = latest;
-        setRecord(latest);
-        setSaveStatus('Kaydedildi — yerel');
-      } catch {
-        setSaveStatus('Yerel kayıt başarısız');
-      }
+      const latest = await flushDraft();
       triggerSvgDownload(latest.preparedSvg, filename);
       setExportOpen(false);
     } catch (error) {
@@ -314,6 +349,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
           <div className="aop-editor-header-actions">
             <button type="button" onClick={() => setHistory((current) => undo(current))} disabled={!history.past.length || pending} aria-label="Geri al">↶ <span>Geri Al</span></button>
             <button type="button" onClick={() => setHistory((current) => redo(current))} disabled={!history.future.length || pending} aria-label="Yinele">↷ <span>Yinele</span></button>
+            <button type="button" className="aop-local-save-button" onClick={() => flushDraft().catch(() => {})} disabled={pending || saveStatus === 'Kaydediliyor…'} aria-label="Taslağı hemen yerel olarak kaydet">Yerel Kaydet</button>
             <button type="button" onClick={() => setExportOpen(true)} disabled={pending}>Dışa Aktar</button>
             <button type="button" onClick={resetAutomaticAnalysis} disabled={pending || !record.baseSvg}>Analizi Sıfırla</button>
             <button type="button" className="is-primary" onClick={applyRoom} disabled={pending || !currentValidation.valid}>Odaya Uygula</button>

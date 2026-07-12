@@ -11,9 +11,8 @@ export function applySurfaceClick(selectedIds, surfaceId, { ctrl = false } = {})
       : [...selected, surfaceId];
   }
   if (!surfaceId) return [];
-  if (!selected.length) return [surfaceId];
   if (selected.includes(surfaceId)) return selected;
-  return [];
+  return [surfaceId];
 }
 
 export function beginBrush(selectedIds, surfaceId, { ctrl = false, mode = null } = {}) {
@@ -85,8 +84,29 @@ export function boundaryIntersectsRect(boundary, rawRect) {
   return false;
 }
 
-export function surfacesIntersectingMarquee(surfaces, rect) {
-  return surfaces.filter((surface) => boundaryIntersectsRect(surface.boundary, rect)).map((surface) => surface.id);
+function gridRunsIntersectRect(surface, rect, viewBox) {
+  const geometry = surface.geometry;
+  if (geometry?.type !== 'grid_runs' || !viewBox) return false;
+  const cellWidth = viewBox.width / geometry.columns;
+  const cellHeight = viewBox.height / geometry.rows;
+  return geometry.runs.some(([start, end]) => {
+    const row = Math.floor(start / geometry.columns);
+    const firstColumn = start % geometry.columns;
+    const lastColumn = end % geometry.columns;
+    const runRect = {
+      x: viewBox.x + firstColumn * cellWidth,
+      y: viewBox.y + row * cellHeight,
+      width: (lastColumn - firstColumn + 1) * cellWidth,
+      height: cellHeight,
+    };
+    return runRect.x <= rect.x + rect.width && runRect.x + runRect.width >= rect.x
+      && runRect.y <= rect.y + rect.height && runRect.y + runRect.height >= rect.y;
+  });
+}
+
+export function surfacesIntersectingMarquee(surfaces, rect, viewBox = null) {
+  return surfaces.filter((surface) => boundaryIntersectsRect(surface.boundary, rect)
+    || gridRunsIntersectRect(surface, rect, viewBox)).map((surface) => surface.id);
 }
 
 export function applyMarqueeSelection(selectedIds, intersectedIds, mode = 'replace') {

@@ -8,9 +8,9 @@ import {
 } from './editorSelection';
 
 describe('terrain editor selection', () => {
-  it('implements the intentional clear-without-replace click contract', () => {
+  it('replaces a normal click selection and keeps Ctrl toggle behavior', () => {
     expect(applySurfaceClick([], 'a')).toEqual(['a']);
-    expect(applySurfaceClick(['a'], 'b')).toEqual([]);
+    expect(applySurfaceClick(['a'], 'b')).toEqual(['b']);
     expect(applySurfaceClick(['a', 'b'], 'a')).toEqual(['a', 'b']);
     expect(applySurfaceClick(['a'], null)).toEqual([]);
     expect(applySurfaceClick(['a'], 'b', { ctrl: true })).toEqual(['a', 'b']);
@@ -32,5 +32,11 @@ describe('terrain editor selection', () => {
     expect(surfacesIntersectingMarquee([
       { id: 'rotated', boundary: rotated }, { id: 'far', boundary: far },
     ], { x: 8, y: 8, width: 4, height: 4 })).toEqual(['rotated']);
+  });
+
+  it('intersects deterministic synthetic-water grid runs in viewBox coordinates', () => {
+    expect(surfacesIntersectingMarquee([{
+      id: 'water_1', boundary: [], geometry: { type: 'grid_runs', columns: 10, rows: 5, runs: [[8, 9], [18, 19]] },
+    }], { x: 85, y: 5, width: 5, height: 15 }, { x: 0, y: 0, width: 100, height: 50 })).toEqual(['water_1']);
   });
 });

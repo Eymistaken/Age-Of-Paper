@@ -1,4 +1,6 @@
-export const MAX_SVG_FILE_SIZE = 600_000;
+// Absolute cap for an untrusted upload. Prepared exports use compact metadata,
+// but a source near the 650 KB base-asset limit still needs bounded headroom.
+export const MAX_SVG_FILE_SIZE = 1_000_000;
 
 export function validateSvgFile(file) {
   if (!file) throw new Error('Bir SVG dosyası seçin.');

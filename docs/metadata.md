@@ -36,7 +36,7 @@ Every explicit SVG surface and inferred water component has a normalized, unique
 
 Use neutral identifiers such as `land_a`, `land_b`, `water_1`, and `lake_1`. Application logic must not depend on geography-specific IDs.
 
-A full exported surface is equivalent to:
+A full local IndexedDB surface record is equivalent to:
 
 ```json
 {
@@ -98,7 +98,7 @@ Synthetic components use compact row runs:
 }
 ```
 
-Each pair is an inclusive linear cell range and never crosses a row. A component touching the root grid boundary is initially `ocean`; a fully enclosed component is initially `lake`. Stable synthetic IDs derive from normalized component cells. Full exports and IndexedDB drafts retain this geometry. The compact Firestore metadata asset omits reproducible grid and editor evidence; a remote editor regenerates it locally.
+Each pair is an inclusive linear cell range and never crosses a row. A component touching the root grid boundary is initially `ocean`; a fully enclosed component is initially `lake`. Stable synthetic IDs derive from normalized component cells. IndexedDB drafts retain this geometry. Compact SVG export and Firestore metadata omit reproducible grid and editor evidence; the same analysis version regenerates it from the hash-matched base SVG.
 
 ## Coasts, adjacency, and ports
 
@@ -108,9 +108,9 @@ Each pair is an inclusive linear cell range and never crosses a row. A component
 
 `compatibilityRoutes` contains normalized two-element ID pairs for the existing naval combat model. Derivation keeps a route only when both endpoints remain coastal land. Port permission does not fabricate a route. Current claiming uses the derived land-only `landNeighbors` and `claimNeighbors` graph; a disconnected playable graph remains a blocking validation error.
 
-## Full export versus compact room package
+## Full local document versus compact export/package
 
-The full SVG export preserves:
+The full IndexedDB editor document preserves:
 
 - automatic classifications and confidence evidence;
 - imported metadata classifications;
@@ -120,7 +120,7 @@ The full SVG export preserves:
 - coasts, adjacency, port permissions, compatibility routes;
 - map/editor/analysis versions and hashes.
 
-The compact room metadata package preserves only data required to validate identity and reconstruct rendered final terrain. It omits history, thumbnail, original draft, detailed confidence evidence, and large reproducible geometry.
+SVG exports and room metadata use the same compact, versioned representation. It preserves `mapId`, revision, classifications, host overrides, effective terrain, coast/port results, game adjacency, compatibility routes, prices, and hashes. It omits history, thumbnail, original draft, detailed confidence evidence, transformed boundary samples, and large reproducible grid geometry. This keeps an export from exceeding the importer limit merely because derived geometry was duplicated into the file.
 
 ## Content-addressed room transport
 
@@ -171,11 +171,13 @@ The version 1 local repository uses three object stores:
 - `baseAssets`, keyed by `baseSvgHash`;
 - `metadataAssets`, keyed by `metadataHash`.
 
-A full map record retains display name, original SVG, normalized base SVG, prepared export SVG, compatibility definition, automatic analysis, imported classifications, host overrides, effective terrain, water geometry, coasts, port permissions, versions, hashes, thumbnail/preview data, source label, validation, and timestamps. Autosave failure or quota exhaustion never clears the active in-memory document.
+A full map record retains display name, original SVG, normalized base SVG, prepared export SVG, compatibility definition, automatic analysis, imported classifications, host overrides, effective terrain, water geometry, coasts, port permissions, versions, hashes, thumbnail/preview data, source label, validation, and timestamps. `mapId` and `createdAt` are immutable across edit/save/close/reopen; only explicit import-as-copy and duplicate actions allocate another identity.
+
+The editor opens a trusted repository record directly after structural validation; it does not reparse its prepared SVG as a new upload. A logical edit marks `Kaydedilmemiş değişiklikler`, one 650 ms debounce changes the state to `Kaydediliyor…`, and a successful upsert ends at `Yerel olarak kaydedildi`. A quota/storage failure remains in memory as `Yerel kayıt başarısız — yeniden deneyin`; `Yerel Kaydet` immediately retries. Opening or closing an unchanged record performs no upsert. No local save path writes Firestore.
 
 ## Validation and security
 
-Import performs these checks before applying metadata:
+Untrusted SVG input has a strict 1,000,000-byte absolute cap. Normalized base room assets remain limited to 650,000 characters and compact metadata to 450,000 characters. Import performs these checks before applying metadata:
 
 - supported schema/editor versions and bounded JSON size;
 - valid field types, terrain/coast enums, confidence and revision;
@@ -191,8 +193,8 @@ Before parsing metadata, the SVG sanitizer removes scripts, executable animation
 
 ## Round trip, mismatch, and migration
 
-A valid exported SVG reimports to the same map ID, effective terrain, coasts, port permissions, water components, and compatibility definition. Filename changes do not affect detection.
+A valid compact-metadata SVG export reimports to the same map ID, effective terrain, host overrides, coasts, port permissions, water components, and compatibility definition. Filename changes do not affect detection. A near-limit source can therefore round-trip without embedding a second copy of sampled geometry.
 
 When a local record already has the same `mapId`, the importer asks to update it, import a new copy, or cancel. When source geometry differs, it asks to remap matching IDs, rerun analysis, import a new map, or cancel. Remapping copies only metadata for IDs that actually exist after fresh analysis. Mismatched metadata is never applied silently.
 
-Future schemas must add an explicit migration from the previous supported version. Unknown versions remain readable as ordinary sanitized artwork but cannot be trusted as prepared game data until migrated or reanalyzed.
+Future schemas must add an explicit migration from the previous supported version. Invalid or unknown embedded editor metadata is rejected as prepared game data and never silently converted into a newly identified map; migration or an explicit reanalysis path is required.

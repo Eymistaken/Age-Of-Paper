@@ -1,6 +1,41 @@
 import { describe, expect, it } from 'vitest';
 import { decideAssetFetch, openMapRepository } from './mapRepository';
 
+function fakeIndexedDb() {
+  const stores = new Map();
+  const database = {
+    objectStoreNames: { contains: (name) => stores.has(name) },
+    createObjectStore(name) { stores.set(name, new Map()); },
+    transaction(name) {
+      const values = stores.get(name);
+      const transaction = {
+        objectStore: () => ({
+          get(key) { return request(() => structuredClone(values.get(key))); },
+          getAll() { return request(() => [...values.values()].map((value) => structuredClone(value))); },
+          put(value) { values.set(value.mapId || value.hash, structuredClone(value)); queueMicrotask(() => transaction.oncomplete?.()); },
+          delete(key) { values.delete(key); queueMicrotask(() => transaction.oncomplete?.()); },
+        }),
+      };
+      return transaction;
+    },
+  };
+  function request(read) {
+    const result = {};
+    queueMicrotask(() => {
+      try { result.result = read(); result.onsuccess?.(); }
+      catch (error) { result.error = error; result.onerror?.(); }
+    });
+    return result;
+  }
+  return {
+    open() {
+      const result = { result: database };
+      queueMicrotask(() => { result.onupgradeneeded?.(); result.onsuccess?.(); });
+      return result;
+    },
+  };
+}
+
 describe('local prepared map repository', () => {
   it('persists, sorts, duplicates and deletes maps without localStorage', async () => {
     const repository = await openMapRepository({ indexedDB: null });
@@ -11,6 +46,19 @@ describe('local prepared map repository', () => {
     expect(duplicate).toMatchObject({ mapId: 'copy', displayName: 'Yeni — Kopya' });
     await repository.deletePreparedMap('older');
     expect(await repository.getPreparedMap('older')).toBeNull();
+  });
+
+  it('upserts one stable identity and preserves it after a repository reopen', async () => {
+    const indexedDB = fakeIndexedDb();
+    const firstSession = await openMapRepository({ indexedDB });
+    await firstSession.savePreparedMap({ mapId: 'stable', displayName: 'İlk', createdAt: 100, updatedAt: 110 });
+    await firstSession.savePreparedMap({ mapId: 'stable', displayName: 'Düzenlendi', createdAt: 999, updatedAt: 120 });
+    expect(await firstSession.listPreparedMaps()).toHaveLength(1);
+
+    const afterReload = await openMapRepository({ indexedDB });
+    expect(await afterReload.getPreparedMap('stable')).toMatchObject({
+      mapId: 'stable', displayName: 'Düzenlendi', createdAt: 100, updatedAt: 120,
+    });
   });
 
   it('stores content addressed base and metadata assets separately', async () => {

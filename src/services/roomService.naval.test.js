@@ -18,7 +18,7 @@ vi.mock('firebase/firestore', () => ({
 }));
 
 import { prepareSvgMap } from '../game/mapImporter';
-import { configureNavalMap, setRoomMap } from './roomService';
+import { configureNavalMap, setRoomMap, startGame } from './roomService';
 
 function lobbyRoom() {
   const regions = ['a', 'b'].map((id) => ({
@@ -34,6 +34,14 @@ function lobbyRoom() {
   return {
     phase: 'lobby',
     hostId: 'host',
+    mapSvg: '',
+    mapManifest: {
+      version: 1, mapId: 'map_manifest', displayName: 'Manifest', revision: 1,
+      baseSvgHash: 'abcdef', metadataHash: 'fedcba', metadataSchemaVersion: 1,
+      analysisAlgorithmVersion: 'terrain-grid-v1', mapDefinitionVersion: 1,
+    },
+    mapValidation: { valid: true, errors: [], warnings: [] },
+    players: { host: { id: 'host', name: 'Host' }, member: { id: 'member', name: 'Member' } },
     mapDefinition: {
       version: 1,
       regionIds: ['a', 'b'],
@@ -77,6 +85,26 @@ describe('setRoomMap content-addressed transaction', () => {
     expect(update.mapManifest).toMatchObject({ mapId: prepared.mapId, baseSvgHash: prepared.baseSvgHash, metadataHash: prepared.metadataHash });
     expect(update.mapDefinition.regionIds).toEqual(['land_a', 'land_b']);
     expect(update.mapValidation.valid).toBe(true);
+  });
+
+  it('translates a denied atomic asset/manifest commit into a contextual Turkish error', async () => {
+    const prepared = await prepareSvgMap(`<svg viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">
+      <rect id="land_a" data-terrain="land" width="50" height="50"/>
+      <rect id="water_1" data-terrain="ocean" x="50" width="50" height="50"/>
+    </svg>`);
+    firestore.runTransaction.mockRejectedValueOnce({ code: 'permission-denied', message: 'Missing or insufficient permissions.' });
+    await expect(setRoomMap('ABCD', 'host', prepared)).rejects.toMatchObject({
+      code: 'MAP_ASSET_PERMISSION',
+      message: expect.stringContaining('harita asset'),
+    });
+  });
+});
+
+describe('startGame map compatibility', () => {
+  it('accepts a validated manifest-backed map when legacy mapSvg is empty', async () => {
+    await startGame('ABCD', 'host');
+    expect(firestore.update).toHaveBeenCalledOnce();
+    expect(firestore.update.mock.calls[0][1]).toMatchObject({ phase: 'claiming', turnNumber: 1 });
   });
 });
 

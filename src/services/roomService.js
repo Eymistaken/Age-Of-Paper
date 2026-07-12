@@ -417,29 +417,39 @@ export async function setRoomMap(roomCode, userId, importedMap) {
   const validation = validateMapDefinition(preparedMap.mapDefinition);
   if (!validation.valid) throw new GameActionError('Harita doğrulama hataları çözülmeden odaya uygulanamaz.', 'INVALID_MAP');
   const assets = await buildRoomMapAssets({ ...preparedMap, validation });
-  await runTransaction(db, async (transaction) => {
-    const reference = roomRef(roomCode);
-    const baseReference = doc(db, ROOM_COLLECTION, roomCode, 'mapAssets', `base_${assets.manifest.baseSvgHash}`);
-    const metadataReference = doc(db, ROOM_COLLECTION, roomCode, 'mapAssets', `metadata_${assets.manifest.metadataHash}`);
-    const [snapshot, baseSnapshot, metadataSnapshot] = await Promise.all([
-      transaction.get(reference),
-      transaction.get(baseReference),
-      transaction.get(metadataReference),
-    ]);
-    if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
-    const room = snapshot.data();
-    if (room.hostId !== userId) throw new GameActionError('Haritayı yalnızca kurucu değiştirebilir.', 'HOST_ONLY');
-    if (room.phase !== PHASES.LOBBY) throw new GameActionError('Oyun başladıktan sonra harita değiştirilemez.', 'ROOM_STARTED');
-    const createdAt = Timestamp.now();
-    if (!baseSnapshot.exists()) transaction.set(baseReference, { ...assets.baseAsset, createdAt, createdBy: userId });
-    if (!metadataSnapshot.exists()) transaction.set(metadataReference, { ...assets.metadataAsset, createdAt, createdBy: userId });
-    transaction.update(reference, {
-      mapSvg: '',
-      mapManifest: assets.manifest,
-      mapDefinition: preparedMap.mapDefinition,
-      mapValidation: validation,
+  try {
+    await runTransaction(db, async (transaction) => {
+      const reference = roomRef(roomCode);
+      const baseReference = doc(db, ROOM_COLLECTION, roomCode, 'mapAssets', `base_${assets.manifest.baseSvgHash}`);
+      const metadataReference = doc(db, ROOM_COLLECTION, roomCode, 'mapAssets', `metadata_${assets.manifest.metadataHash}`);
+      const [snapshot, baseSnapshot, metadataSnapshot] = await Promise.all([
+        transaction.get(reference),
+        transaction.get(baseReference),
+        transaction.get(metadataReference),
+      ]);
+      if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
+      const room = snapshot.data();
+      if (room.hostId !== userId) throw new GameActionError('Haritayı yalnızca kurucu değiştirebilir.', 'HOST_ONLY');
+      if (room.phase !== PHASES.LOBBY) throw new GameActionError('Oyun başladıktan sonra harita değiştirilemez.', 'ROOM_STARTED');
+      const createdAt = Timestamp.now();
+      if (!baseSnapshot.exists()) transaction.set(baseReference, { ...assets.baseAsset, createdAt, createdBy: userId });
+      if (!metadataSnapshot.exists()) transaction.set(metadataReference, { ...assets.metadataAsset, createdAt, createdBy: userId });
+      transaction.update(reference, {
+        mapSvg: '',
+        mapManifest: assets.manifest,
+        mapDefinition: preparedMap.mapDefinition,
+        mapValidation: validation,
+      });
     });
-  });
+  } catch (error) {
+    if (error?.code === 'permission-denied' || error?.code === 'firestore/permission-denied') {
+      throw new GameActionError(
+        'Oda harita asset’leri ile manifestin atomik yazımı Firestore Rules tarafından reddedildi. Bu işlem yalnızca lobideki oda kurucusunun “Odaya Uygula” eylemiyle yapılabilir.',
+        'MAP_ASSET_PERMISSION',
+      );
+    }
+    throw error;
+  }
 }
 
 export async function configureNavalMap(roomCode, userId, edit) {
@@ -482,7 +492,12 @@ export async function startGame(roomCode, userId) {
     if (room.hostId !== userId) throw new GameActionError('Oyunu yalnızca kurucu başlatabilir.', 'HOST_ONLY');
     if (room.phase !== PHASES.LOBBY) throw new GameActionError('Oyun zaten başlatılmış.', 'ROOM_STARTED');
     const validation = validateMapDefinition(room.mapDefinition);
-    if (!validation.valid || !room.mapSvg) throw new GameActionError('Geçerli bir harita yüklenmeden oyun başlatılamaz.', 'INVALID_MAP');
+    const hasLegacyMap = typeof room.mapSvg === 'string' && room.mapSvg.trim().length > 0;
+    const hasManifestMap = room.mapManifest
+      && typeof room.mapManifest.mapId === 'string' && room.mapManifest.mapId.length > 0
+      && typeof room.mapManifest.baseSvgHash === 'string' && room.mapManifest.baseSvgHash.length > 0
+      && typeof room.mapManifest.metadataHash === 'string' && room.mapManifest.metadataHash.length > 0;
+    if (!validation.valid || (!hasLegacyMap && !hasManifestMap)) throw new GameActionError('Geçerli bir harita yüklenmeden oyun başlatılamaz.', 'INVALID_MAP');
     const turnOrder = shuffled(Object.keys(room.players || {}));
     if (!turnOrder.length) throw new GameActionError('Oyunu başlatmak için bir oyuncu gerekli.', 'NO_PLAYERS');
     const players = Object.fromEntries(Object.entries(room.players).map(([id, player]) => [id, {
