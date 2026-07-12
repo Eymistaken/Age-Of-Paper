@@ -1,10 +1,8 @@
-import { normalizeRegionId, sanitizeSvgMarkup } from './mapImporter';
+import { sanitizeSvgMarkup } from './mapImporter';
 import { inferBoundaryAdjacency } from './svgAdjacency';
-import { measureRegionGeometry } from './svgGeometry';
-import { deriveTerrainDocument, TERRAIN_TYPES } from './terrainModel';
+import { ANALYSIS_ALGORITHM_VERSION, deriveTerrainDocument, TERRAIN_TYPES } from './terrainModel';
+import { extractSurfaceCandidates, normalizeRegionId } from './surfaceCandidates';
 
-const SHAPE_SELECTOR = 'path,polygon,rect,circle,ellipse,polyline';
-const EXCLUDED_ANCESTORS = 'defs,clipPath,mask,pattern,marker,symbol';
 const TERRAIN_SET = new Set(TERRAIN_TYPES);
 const LAKE_WORDS = /(^|[\s_-])(lake|pond|reservoir)([\s_-]|$)/i;
 const OCEAN_WORDS = /(^|[\s_-])(water|sea|ocean)([\s_-]|$)/i;
@@ -194,19 +192,6 @@ function yieldToBrowser() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function isRenderable(element) {
-  if (element.closest(EXCLUDED_ANCESTORS)) return false;
-  const style = (element.getAttribute('style') || '').toLowerCase();
-  const fill = (element.getAttribute('fill') || '').trim().toLowerCase();
-  return element.getAttribute('display') !== 'none'
-    && element.getAttribute('visibility') !== 'hidden'
-    && element.getAttribute('opacity') !== '0'
-    && !/(?:^|;)\s*display\s*:\s*none/.test(style)
-    && !/(?:^|;)\s*visibility\s*:\s*hidden/.test(style)
-    && fill !== 'none'
-    && !/(?:^|;)\s*fill\s*:\s*none/.test(style);
-}
-
 export async function analyzeSvgTerrain({ svgText, signal, onProgress } = {}) {
   throwIfAborted(signal);
   onProgress?.({ phase: 'sanitize', progress: 0.05, message: 'SVG güvenli hale getiriliyor…' });
@@ -214,20 +199,10 @@ export async function analyzeSvgTerrain({ svgText, signal, onProgress } = {}) {
   const document = new DOMParser().parseFromString(sanitizedSvg, 'image/svg+xml');
   const svg = document.documentElement;
   const viewBox = parseViewBox(svg);
-  const elements = [...svg.querySelectorAll(SHAPE_SELECTOR)].filter(isRenderable);
-  const usedIds = new Set();
-  const sourceIds = new Set();
-  const importIssues = [];
-  const records = elements.map((element, index) => {
-    const sourceId = element.getAttribute('id') || `surface_${index + 1}`;
-    let id = normalizeRegionId(sourceId, `surface_${index + 1}`);
-    if (sourceIds.has(sourceId)) importIssues.push({ severity: 'error', code: 'DUPLICATE_ID', message: `SVG içinde “${sourceId}” kimliği yineleniyor.` });
-    sourceIds.add(sourceId);
-    if (id !== sourceId) importIssues.push({ severity: 'warning', code: 'NORMALIZED_ID', message: `“${sourceId}” güvenli “${id}” kimliğine dönüştürüldü.` });
-    let suffix = 2;
-    if (usedIds.has(id)) importIssues.push({ severity: 'error', code: 'DUPLICATE_ID', message: `Birden fazla SVG kimliği “${id}” değerine dönüşüyor.` });
-    while (usedIds.has(id)) id = `${normalizeRegionId(sourceId)}_${suffix++}`;
-    usedIds.add(id);
+  const extracted = extractSurfaceCandidates(svg, { viewBox });
+  const importIssues = [...extracted.importIssues];
+  const records = extracted.records.map((candidate) => {
+    const { element, id } = candidate;
     element.setAttribute('id', id);
     element.setAttribute('data-surface-id', id);
     element.setAttribute('data-region-id', id);
@@ -239,14 +214,14 @@ export async function analyzeSvgTerrain({ svgText, signal, onProgress } = {}) {
       explicitRegion: element.getAttribute('data-region') === 'true',
       ignored: element.getAttribute('data-ignore') === 'true',
     };
-    return { element, id, sourceId, automatic: classifyAutomaticSurface(semantic) };
+    return { ...candidate, automatic: classifyAutomaticSurface(semantic) };
   });
-  const sourceToId = new Map(records.map((record) => [record.sourceId, record.id]));
+  const sourceToId = extracted.sourceToId;
   const resolveIds = (values) => values === null ? null : [...new Set(values.map((value) => sourceToId.get(value) || normalizeRegionId(value)))].sort();
   await yieldToBrowser();
   throwIfAborted(signal);
   onProgress?.({ phase: 'geometry', progress: 0.24, message: 'ViewBox geometrisi ölçülüyor…' });
-  const geometry = measureRegionGeometry(svg, records, viewBox);
+  const geometry = extracted.geometry;
   const surfaces = records.map((record) => {
     const element = record.element;
     const explicitTerrain = element.getAttribute('data-terrain');
@@ -357,7 +332,7 @@ export async function analyzeSvgTerrain({ svgText, signal, onProgress } = {}) {
     viewBox,
     surfaces: allSurfaces,
     compatibilityRoutes: surfaces.flatMap((surface) => surface.seaNeighborIds.map((neighborId) => [surface.id, neighborId])),
-    analysisAlgorithmVersion: 'terrain-grid-v1',
+    analysisAlgorithmVersion: ANALYSIS_ALGORITHM_VERSION,
     importIssues: [
       ...importIssues,
       ...(geometry.unmeasuredBoundaryIds.length ? [{

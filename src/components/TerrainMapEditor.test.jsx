@@ -205,6 +205,40 @@ describe('terrain map editor workspace', () => {
     expect(onApply).toHaveBeenCalledOnce();
   });
 
+  it('repairs a previous-version draft from originalSvg while preserving its stable identity', async () => {
+    const originalSvg = `<svg viewBox="100 50 200 100" xmlns="http://www.w3.org/2000/svg">
+      <polygon id="R-1" points="100,50 300,50 300,150 100,150"/><circle id="R-1" cx="200" cy="100" r="3"/>
+    </svg>`;
+    const previous = await prepareSvgMap(`<svg viewBox="100 50 200 100" xmlns="http://www.w3.org/2000/svg">
+      <polygon id="R-1" data-terrain="land" points="100,50 300,50 300,150 100,150"/>
+      <circle id="R-1_2" data-terrain="land" cx="200" cy="100" r="3"/>
+    </svg>`, { mapId: 'map_stable_reset', displayName: 'Eski Taslak' });
+    prepared = {
+      ...previous,
+      originalSvg,
+      terrainDocument: { ...previous.terrainDocument, analysisAlgorithmVersion: 'terrain-grid-v1' },
+      mapDefinition: { ...previous.mapDefinition, analysisAlgorithmVersion: 'terrain-grid-v1' },
+    };
+    const createdAt = prepared.createdAt;
+    await renderEditor();
+    expect(document.body.textContent).toContain('önceki analiz sürümünü');
+    expect([...document.querySelectorAll('button')].find((button) => button.textContent === 'Odaya Uygula').disabled).toBe(true);
+    await act(async () => {
+      [...document.querySelectorAll('button')].find((button) => button.textContent === 'Analizi Sıfırla').click();
+      await vi.waitFor(async () => {
+        const stored = await repository.getPreparedMap('map_stable_reset');
+        expect(stored?.terrainDocument.analysisAlgorithmVersion).toBe('terrain-grid-v2');
+      });
+    });
+    const repaired = await repository.getPreparedMap('map_stable_reset');
+    expect(repaired).toMatchObject({ mapId: 'map_stable_reset', createdAt, originalSvg });
+    expect(repaired.mapDefinition.regionIds).toEqual(['R-1']);
+    expect(repaired.validation.valid).toBe(true);
+    const base = new DOMParser().parseFromString(repaired.baseSvg, 'image/svg+xml');
+    expect(base.querySelector('polygon').id).toBe('R-1');
+    expect(base.querySelector('circle').id).toMatch(/^aop_aux_R-1_/);
+  });
+
   it('uses a low-confidence row to replace selection, highlight, inspect and reveal without editing terrain', async () => {
     prepared = await prepareSvgMap('<svg viewBox="0 0 1000 100" xmlns="http://www.w3.org/2000/svg"><rect id="alpha" x="0" width="80" height="100"/><rect id="omega" x="920" width="80" height="100"/></svg>', { displayName: 'Review' });
     await renderEditor();

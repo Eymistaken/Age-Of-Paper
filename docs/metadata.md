@@ -18,7 +18,7 @@ The node contains JSON text, not executable markup. JSON is serialized with recu
 
 - `schemaVersion: 1` is the exported metadata schema.
 - `editorVersion: 1` identifies the local editor document contract.
-- `analysisAlgorithmVersion: "terrain-grid-v1"` identifies the automatic classification and negative-space algorithm.
+- `analysisAlgorithmVersion: "terrain-grid-v2"` identifies the automatic classification, owned-surface extraction, and negative-space algorithm. Version 1 drafts require explicit reanalysis.
 - `mapId` is the stable logical map identity. Editing and exporting preserves it.
 - `revision` is a positive integer. Applying a changed draft to a room increments it.
 - `sourceGeometryHash` is the hash of sanitized, normalized base artwork after Age of Paper metadata and game attributes are removed.
@@ -79,6 +79,14 @@ Terrain is one of `land`, `ocean`, `lake`, or `ignored`. Effective precedence is
 
 Only effective `land` surfaces enter the playable compatibility map. Other terrain is never priced, owned, claimed, or income-producing.
 
+### Owned surfaces and auxiliary artwork
+
+Ordinary SVGs often reuse a region ID on a path/polygon and a small circle, ellipse, or rectangle used as a label or centroid anchor. Version 2 groups candidates by source/normalized identity and chooses ownership deterministically: valid `data-region`/`data-terrain` metadata first, path/polygon region geometry second, and other supported shapes last.
+
+An unmarked circle, ellipse, or rectangle is auxiliary only when root-viewBox measurement proves it is substantially smaller and contained by or centered on the owner. Size alone never demotes a shape. Explicitly marked circular regions remain surfaces, standalone meaningful circular regions remain supported, and similarly significant duplicate paths/polygons remain a blocking `DUPLICATE_ID` error.
+
+Auxiliary nodes are not deleted. Their visual SVG attributes remain intact, they receive collision-free deterministic `aop_aux_*` DOM IDs, and they do not enter selection, pricing, adjacency, compact metadata, compatibility regions, or validation. A batch of inferred markers produces one bounded `AUXILIARY_ARTWORK` warning with a count and short sample.
+
 ## Water geometry
 
 Explicit ocean and lake SVG elements use `elementId` and normal transformed boundary data. Water missing from the artwork is derived from root `viewBox` negative space. It uses a deterministic aspect-aware grid independent of CSS size, device pixels, camera zoom, or viewport width.
@@ -136,7 +144,7 @@ New room maps do not keep the large SVG inline in the live room document. The ro
     "baseSvgHash": "…",
     "metadataHash": "…",
     "metadataSchemaVersion": 1,
-    "analysisAlgorithmVersion": "terrain-grid-v1",
+    "analysisAlgorithmVersion": "terrain-grid-v2",
     "mapDefinitionVersion": 1
   },
   "mapDefinition": { "version": 1 },
@@ -175,6 +183,8 @@ A full map record retains display name, original SVG, normalized base SVG, prepa
 
 The editor opens a trusted repository record directly after structural validation; it does not reparse its prepared SVG as a new upload. A logical edit marks `Kaydedilmemiş değişiklikler`, one 650 ms debounce changes the state to `Kaydediliyor…`, and a successful upsert ends at `Yerel olarak kaydedildi`. A quota/storage failure remains in memory as `Yerel kayıt başarısız — yeniden deneyin`; `Yerel Kaydet` immediately retries. Opening or closing an unchanged record performs no upsert. No local save path writes Firestore.
 
+Previous-analysis records are shown as requiring reanalysis and cannot be exported or applied to a room. `Analizi Sıfırla` force-reanalyzes the retained `originalSvg` when present, falls back to `baseSvg` only when necessary, and preserves `mapId`, `createdAt`, revision, display name, and source label while replacing IDs normalized by the old importer.
+
 ## Validation and security
 
 Untrusted SVG input has a strict 1,000,000-byte absolute cap. Normalized base room assets remain limited to 650,000 characters and compact metadata to 450,000 characters. Import performs these checks before applying metadata:
@@ -197,4 +207,4 @@ A valid compact-metadata SVG export reimports to the same map ID, effective terr
 
 When a local record already has the same `mapId`, the importer asks to update it, import a new copy, or cancel. When source geometry differs, it asks to remap matching IDs, rerun analysis, import a new map, or cancel. Remapping copies only metadata for IDs that actually exist after fresh analysis. Mismatched metadata is never applied silently.
 
-Future schemas must add an explicit migration from the previous supported version. Invalid or unknown embedded editor metadata is rejected as prepared game data and never silently converted into a newly identified map; migration or an explicit reanalysis path is required.
+Future schemas must add an explicit migration from the previous supported version. Invalid, version 1, or unknown embedded editor metadata is rejected as prepared game data and never silently converted into a newly identified map; migration or an explicit force-reanalysis path is required.

@@ -89,7 +89,7 @@ Bölge ID’leri Firestore field path ile uyumlu biçime normalize edilir. Nokta
 
 ### Legacy SVG davranışı
 
-Açık `data-region="true"` yoksa importer, uygun `path`, `polygon`, `rect`, `circle`, `ellipse` ve `polyline` öğelerini aday kabul eder. `<defs>`, `clipPath`, `mask`, `pattern`, `marker`, `symbol`, `fill="none"`, su/dekorasyon sınıfları ve `data-ignore="true"` öğeleri dışlanır.
+Açık `data-region="true"` yoksa importer, uygun `path`, `polygon`, `rect`, `circle`, `ellipse` ve `polyline` öğelerini aday kabul eder. `<defs>`, `clipPath`, `mask`, `pattern`, `marker`, `symbol`, `fill="none"`, su/dekorasyon sınıfları ve `data-ignore="true"` öğeleri dışlanır. Aynı kaynak kimliğini taşıyan bölge path/polygon’u ile küçük circle/ellipse/rect etiket işareti root `viewBox` geometrisiyle tek sahip altında gruplanır; işaret çizimde kalır, güvenli `aop_aux_*` DOM kimliği alır ve oynanabilir yüzey olmaz. Açık `data-region`/`data-terrain` işareti bu çıkarımdan üstündür; anlamlı dairesel bölgeler desteklenmeye devam eder ve benzer büyüklükte yinelenen geometriler hata kalır.
 
 Komşuluk metadata’sı eksikse yalnızca import sırasında iki aşamalı SVG `viewBox` geometrisi kullanılır. Bounding box yalnızca ucuz aday elemesidir; kesin karar, ortak koordinatlara CTM ile taşınmış ve eğrilerden örneklenmiş sınır segmentlerinin ölçek bağımsız mesafesi ile anlamlı ortak uzunluğuna göre verilir. Tek köşe teması, iç içe bounding box veya arada toleranstan büyük boşluk komşuluk oluşturmaz. Ölçüm alınamazsa importer yanlış pozitif üretmek yerine otomatik bağlantı kurmaz ve lobide metadata uyarısı gösterir. Fiyat için ölçülemeyen bölge güvenli medyan büyüklüğe düşer; ham path parametreleri x/y çiftleri olarak yorumlanmaz. Sonuç zoom, viewport ve cihaz genişliğinden etkilenmez. Yeni haritalarda açık metadata kullanılmalıdır.
 
@@ -171,7 +171,7 @@ Gelişmiş boundary işlemi “Seçimi Sınır Halkası Olarak Analiz Et” adı
 
 Bir mantıksal değişiklik en fazla bir 650 ms debounce IndexedDB upsert’i üretir. Durum `Kaydedilmemiş değişiklikler` → `Kaydediliyor…` → `Yerel olarak kaydedildi` olarak ilerler; recoverable failure bellekte korunur ve görünür `Yerel Kaydet` düğmesi anında flush eder. `mapId` ve `createdAt` edit/save/close/reopen boyunca sabittir. Değişmemiş editörü kapatmak yazma yapmaz; yalnız “Odaya Uygula” content-addressed asset ve manifest transaction’ını başlatabilir. “Son Haritalar” güvenilen kaydı yeniden upload gibi parse etmeden açar.
 
-Hazırlanan SVG, güvenli, kompakt ve sürümlü `<metadata id="age-of-paper-map">` JSON kaydı içerir; dosya adı metadata tespitinde kullanılmaz. Büyük tekrar üretilebilir boundary/grid ayrıntıları IndexedDB’de kalır. Aynı `mapId`, geçersiz metadata ve geometri-hash uyuşmazlıkları sessizce yeni haritaya dönüştürülmez. Ayrıntılı sözleşme ve nötr örnekler için [`docs/metadata.md`](docs/metadata.md) dosyasına bakın.
+Hazırlanan SVG, güvenli, kompakt ve sürümlü `<metadata id="age-of-paper-map">` JSON kaydı içerir; dosya adı metadata tespitinde kullanılmaz. Büyük tekrar üretilebilir boundary/grid ayrıntıları IndexedDB’de kalır. Aynı `mapId`, geçersiz metadata ve geometri-hash uyuşmazlıkları sessizce yeni haritaya dönüştürülmez. `terrain-grid-v1` yerel taslakları açıkça yeniden analiz ister; “Analizi Sıfırla” varsa `originalSvg` kaynağını, yoksa `baseSvg`yi kullanarak eski importer’ın yazdığı kimlikleri taşımadan aynı `mapId` altında onarır. Ayrıntılı sözleşme ve nötr örnekler için [`docs/metadata.md`](docs/metadata.md) dosyasına bakın.
 
 ### Content-addressed oda harita asset’leri
 

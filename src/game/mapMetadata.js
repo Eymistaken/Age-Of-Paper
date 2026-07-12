@@ -1,5 +1,6 @@
 import { SAFE_REGION_ID } from './mapValidation';
-import { normalizeRegionId, sanitizeSvgMarkup } from './mapImporter';
+import { sanitizeSvgMarkup } from './mapImporter';
+import { extractSurfaceCandidates, parseSurfaceViewBox } from './surfaceCandidates';
 import {
   ANALYSIS_ALGORITHM_VERSION,
   EDITOR_SCHEMA_VERSION,
@@ -65,17 +66,8 @@ function parseSvg(svgText) {
 export function stripEditorMetadata(svgText) {
   const document = parseSvg(svgText);
   document.querySelectorAll(`#${METADATA_ID},[data-aop-editor-overlay="true"]`).forEach((element) => element.remove());
-  const usedIds = new Set();
-  const replacements = new Map();
-  [...document.querySelectorAll('path,polygon,rect,circle,ellipse,polyline')].forEach((element, index) => {
-    const sourceId = element.getAttribute('id') || `surface_${index + 1}`;
-    let id = normalizeRegionId(sourceId, `surface_${index + 1}`);
-    let suffix = 2;
-    while (usedIds.has(id)) id = `${normalizeRegionId(sourceId)}_${suffix++}`;
-    usedIds.add(id);
-    if (sourceId !== id) replacements.set(sourceId, id);
-    element.setAttribute('id', id);
-  });
+  const svg = document.documentElement;
+  extractSurfaceCandidates(svg, { viewBox: parseSurfaceViewBox(svg) });
   document.querySelectorAll('*').forEach((element) => {
     for (const attribute of [...element.attributes]) {
       if (attribute.name.startsWith('data-aop-')
@@ -85,13 +77,6 @@ export function stripEditorMetadata(svgText) {
           'data-land-neighbors', 'data-sea-neighbors', 'data-coastal',
         ].includes(attribute.name)) {
         element.removeAttribute(attribute.name);
-      } else {
-        let next = attribute.value;
-        replacements.forEach((replacement, source) => {
-          next = next.replaceAll(`url(#${source})`, `url(#${replacement})`);
-          if (next === `#${source}`) next = `#${replacement}`;
-        });
-        if (next !== attribute.value) element.setAttribute(attribute.name, next);
       }
     }
     element.classList.remove('default-land');

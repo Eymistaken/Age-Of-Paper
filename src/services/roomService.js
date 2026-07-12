@@ -24,7 +24,7 @@ import { applyClaim, applySaveIncome, releasePlayerClaims } from '../game/rules'
 import { advanceTurn, getActivePlayerId, removePlayerFromTurnState } from '../game/turns';
 import { validateMapDefinition } from '../game/mapValidation';
 import { prepareSvgMap, rebuildPreparedMap, sanitizeSvgMarkup } from '../game/mapImporter';
-import { deriveTerrainDocument } from '../game/terrainModel';
+import { ANALYSIS_ALGORITHM_VERSION, deriveTerrainDocument } from '../game/terrainModel';
 import { applyNavalMapEdit } from '../game/navalRoutes';
 import { buildRoomMapAssets } from './mapAssetService';
 import {
@@ -408,6 +408,9 @@ export async function setRoomMap(roomCode, userId, importedMap) {
     : await prepareSvgMap(importedMap?.preparedSvg || importedMap?.sanitizedSvg || '', {
       displayName: importedMap?.displayName,
     });
+  if (preparedMap.terrainDocument?.analysisAlgorithmVersion !== ANALYSIS_ALGORITHM_VERSION) {
+    throw new GameActionError('Bu harita önceki analiz sürümünü kullanıyor. Editörde “Analizi Sıfırla” ile yeniden analiz et.', 'STALE_MAP_ANALYSIS');
+  }
   if (preparedMap.terrainDocument) {
     preparedMap = await rebuildPreparedMap(preparedMap, deriveTerrainDocument(preparedMap.terrainDocument));
   } else if (preparedMap.preparedSvg) {

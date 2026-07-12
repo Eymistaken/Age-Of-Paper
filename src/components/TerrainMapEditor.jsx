@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { analyzeSelectedBoundary, previewBatchTerrainChange } from '../game/boundaryAnalysis';
 import { createHistory, executeCommand, redo, undo } from '../game/editorHistory';
 import { prepareSvgMap, rebuildPreparedMap } from '../game/mapImporter';
-import { buildCompatibilityMapDefinition, deriveTerrainDocument } from '../game/terrainModel';
+import { ANALYSIS_ALGORITHM_VERSION, buildCompatibilityMapDefinition, deriveTerrainDocument } from '../game/terrainModel';
 import { validateMapDefinition } from '../game/mapValidation';
 import { TerrainInspector } from './TerrainInspector';
 import { TerrainMapCanvas } from './TerrainMapCanvas';
@@ -70,9 +70,25 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
   latestRecordRef.current = record;
   latestDocumentRef.current = editorDocument;
   onDraftChangeRef.current = onDraftChange;
-  const currentValidation = useMemo(() => validateMapDefinition(buildCompatibilityMapDefinition(editorDocument)), [editorDocument]);
+  const analysisIsCurrent = editorDocument.analysisAlgorithmVersion === ANALYSIS_ALGORITHM_VERSION;
+  const currentValidation = useMemo(() => {
+    const validation = validateMapDefinition(buildCompatibilityMapDefinition(editorDocument));
+    if (editorDocument.analysisAlgorithmVersion === ANALYSIS_ALGORITHM_VERSION) return validation;
+    return {
+      ...validation,
+      valid: false,
+      errors: [{
+        code: 'STALE_ANALYSIS_VERSION',
+        message: 'Bu taslak önceki analiz sürümünü kullanıyor. “Analizi Sıfırla” ile yeniden analiz et.',
+      }, ...validation.errors],
+    };
+  }, [editorDocument]);
 
   useEffect(() => setDisplayName(editorDocument.displayName || record.displayName), [editorDocument.displayName, record.displayName]);
+
+  useEffect(() => {
+    if (!analysisIsCurrent) setFeedback('Bu taslak önceki analiz sürümünü kullanıyor. Odaya uygulamadan önce “Analizi Sıfırla” ile yeniden analiz et.');
+  }, [analysisIsCurrent]);
 
   const canvasRecord = useMemo(() => {
     if (viewMode === 'final') return { ...record, terrainDocument: previewDocument };
@@ -347,17 +363,44 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
   };
 
   const resetAutomaticAnalysis = async () => {
-    if (pending || !record.baseSvg) return;
+    const currentRecord = latestRecordRef.current;
+    const sourceSvg = String(currentRecord.originalSvg || '').trim() || currentRecord.baseSvg;
+    if (pending || !sourceSvg) return;
     setPending(true);
     setFeedback('Otomatik terrain analizi yeniden çalıştırılıyor…');
     try {
-      const fresh = await prepareSvgMap(record.baseSvg, {
+      const fresh = await prepareSvgMap(sourceSvg, {
         displayName,
-        mapId: record.mapId,
-        sourceLabel: record.sourceLabel,
+        mapId: currentRecord.mapId,
+        createdAt: currentRecord.createdAt,
+        sourceLabel: currentRecord.sourceLabel,
+        forceReanalysis: true,
       });
-      commitDocument({ ...fresh.terrainDocument, revision: editorDocument.revision }, 'Otomatik analizi sıfırla');
-      setFeedback('Otomatik analiz yenilendi; işlem geri alınabilir.');
+      const repaired = await rebuildPreparedMap({
+        ...fresh,
+        mapId: currentRecord.mapId,
+        createdAt: currentRecord.createdAt,
+        sourceLabel: currentRecord.sourceLabel,
+      }, {
+        ...fresh.terrainDocument,
+        mapId: currentRecord.mapId,
+        revision: editorDocument.revision,
+      });
+      const saved = await repository.savePreparedMap(repaired);
+      latestRecordRef.current = saved;
+      latestDocumentRef.current = saved.terrainDocument;
+      lastSavedDocumentRef.current = saved.terrainDocument;
+      localDirtyRef.current = false;
+      setRecord(saved);
+      setHistory(createHistory(saved.terrainDocument));
+      setSelectedIds([]);
+      setInspectedId(null);
+      setBoundaryPreview(null);
+      setBatchPreview(null);
+      setDirtyRoom(true);
+      setSaveStatus('Yerel olarak kaydedildi');
+      onDraftChangeRef.current?.(saved);
+      setFeedback('Otomatik analiz özgün SVG kaynağından yenilendi ve yerel taslak onarıldı.');
     } catch (analysisError) {
       setFeedback(`Otomatik analiz yenilenemedi: ${analysisError.message}`);
     } finally {
@@ -385,8 +428,8 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
             <button type="button" onClick={() => setHistory((current) => undo(current))} disabled={!history.past.length || pending} aria-label="Geri al">↶ <span>Geri Al</span></button>
             <button type="button" onClick={() => setHistory((current) => redo(current))} disabled={!history.future.length || pending} aria-label="Yinele">↷ <span>Yinele</span></button>
             <button type="button" className="aop-local-save-button" onClick={() => flushDraft().catch(() => {})} disabled={pending || saveStatus === 'Kaydediliyor…'} aria-label="Taslağı hemen yerel olarak kaydet">Yerel Kaydet</button>
-            <button type="button" onClick={() => setExportOpen(true)} disabled={pending}>Dışa Aktar</button>
-            <button type="button" onClick={resetAutomaticAnalysis} disabled={pending || !record.baseSvg}>Analizi Sıfırla</button>
+            <button type="button" onClick={() => setExportOpen(true)} disabled={pending || !analysisIsCurrent}>Dışa Aktar</button>
+            <button type="button" onClick={resetAutomaticAnalysis} disabled={pending || !(record.originalSvg || record.baseSvg)}>Analizi Sıfırla</button>
             <button type="button" className="is-primary" onClick={applyRoom} disabled={pending || !currentValidation.valid}>Odaya Uygula</button>
             <button type="button" onClick={requestClose} disabled={pending} aria-label="Harita editörünü kapat">×</button>
           </div>

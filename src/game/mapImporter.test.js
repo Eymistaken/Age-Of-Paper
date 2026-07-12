@@ -89,6 +89,33 @@ describe('SVG map importer', () => {
     expect(result.validation.errors.map((item) => item.code)).toContain('DUPLICATE_ID');
   });
 
+  it('imports multiple same-id region and centroid pairs as only the connected real regions', () => {
+    const svg = `<svg viewBox="100 50 300 100" xmlns="http://www.w3.org/2000/svg">
+      <polygon id="R-1" points="100,50 200,50 200,150 100,150"/><circle id="R-1" cx="150" cy="100" r="3"/>
+      <polygon id="R-2" points="200,50 300,50 300,150 200,150"/><circle id="R-2" cx="250" cy="100" r="3"/>
+      <polygon id="R-3" points="300,50 400,50 400,150 300,150"/><circle id="R-3" cx="350" cy="100" r="3"/>
+    </svg>`;
+    const result = importSvgMap(svg);
+    expect(result.mapDefinition.regionIds).toEqual(['R-1', 'R-2', 'R-3']);
+    expect(result.validation.valid).toBe(true);
+    expect(result.validation.errors.map((item) => item.code)).not.toContain('DUPLICATE_ID');
+    expect(result.mapDefinition.regionsById['R-2'].claimNeighbors).toEqual(['R-1', 'R-3']);
+    expect(result.mapDefinition.importIssues.filter((item) => item.code === 'AUXILIARY_ARTWORK')).toHaveLength(1);
+    const document = new DOMParser().parseFromString(result.sanitizedSvg, 'image/svg+xml');
+    expect(document.querySelectorAll('[id^="aop_aux_R-"]')).toHaveLength(3);
+  });
+
+  it('does not price or expose an independent semantic label circle as claimable', () => {
+    const result = importSvgMap(`<svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">
+      <polygon id="left" points="0,0 100,0 100,100 0,100"/>
+      <polygon id="right" points="100,0 200,0 200,100 100,100"/>
+      <circle id="capital_label" class="label" cx="50" cy="50" r="4"/>
+    </svg>`);
+    expect(result.mapDefinition.regionIds).toEqual(['left', 'right']);
+    expect(result.mapDefinition.regionsById.capital_label).toBeUndefined();
+    expect(result.sanitizedSvg).toContain('id="capital_label"');
+  });
+
   it('imports generic coastal and bidirectional sea-route metadata', () => {
     const svg = `<svg viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">
       <rect id="a" data-region="true" data-neighbors="b" data-coastal="true" data-sea-neighbors="b" width="50" height="50" />
@@ -155,9 +182,34 @@ describe('SVG map importer', () => {
     expect(invalid.mapId).toBe('map_stable');
   });
 
+  it('allows an invalid previous-version draft to open only for explicit editor repair', async () => {
+    const prepared = await prepareSvgMap('<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle id="island" data-terrain="land" cx="50" cy="50" r="30"/></svg>', { mapId: 'map_stale_draft' });
+    const stale = {
+      ...prepared,
+      terrainDocument: { ...prepared.terrainDocument, analysisAlgorithmVersion: 'terrain-grid-v1' },
+      mapDefinition: {
+        ...prepared.mapDefinition,
+        analysisAlgorithmVersion: 'terrain-grid-v1',
+        importIssues: [{ severity: 'error', code: 'DUPLICATE_ID', message: 'Eski aday hatası' }],
+      },
+    };
+    expect(() => validatePreparedMapRecord(stale)).toThrow('Analizi Sıfırla');
+    expect(validatePreparedMapRecord(stale, { allowOutdatedAnalysis: true })).toBe(stale);
+  });
+
   it('rejects invalid embedded editor metadata instead of silently analyzing a new mapId', async () => {
     const invalid = '<svg viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><metadata id="age-of-paper-map">{"schemaVersion":1}</metadata><rect id="land_a" width="10" height="10"/></svg>';
     await expect(prepareSvgMap(invalid)).rejects.toMatchObject({ code: 'INVALID_EDITOR_METADATA' });
+  });
+
+  it('requires an explicit reanalysis for previous-version metadata and preserves a requested mapId', async () => {
+    const prepared = await prepareSvgMap('<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle id="island" data-terrain="land" cx="50" cy="50" r="30"/></svg>', { mapId: 'map_stable' });
+    const stale = prepared.preparedSvg.replaceAll('terrain-grid-v2', 'terrain-grid-v1');
+    await expect(prepareSvgMap(stale)).rejects.toMatchObject({ code: 'INVALID_EDITOR_METADATA' });
+    const repaired = await prepareSvgMap(stale, { mapId: 'map_stable', forceReanalysis: true });
+    expect(repaired.mapId).toBe('map_stable');
+    expect(repaired.metadataStatus).toBe('forced_reanalysis');
+    expect(repaired.terrainDocument.analysisAlgorithmVersion).toBe('terrain-grid-v2');
   });
 
   it('keeps automatic economy non-zero when prepared SVG regions omit price metadata', async () => {

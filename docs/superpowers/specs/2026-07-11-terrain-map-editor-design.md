@@ -14,7 +14,7 @@ Coasts are derived only from meaningful sampled boundary contact or land cells t
 
 ## Terrain document
 
-The local editor document uses `editorSchemaVersion: 1`, `metadataSchemaVersion: 1`, and `analysisAlgorithmVersion: "terrain-grid-v1"`. Each surface stores a stable ID, optional SVG element ID, measured geometry, automatic result and confidence, optional imported metadata result, optional host override, effective terrain, coast type, adjacent surface IDs, and port preference. `classificationSource` is computed as `host_override`, `metadata`, or `automatic`.
+The local editor document uses `editorSchemaVersion: 1`, `metadataSchemaVersion: 1`, and `analysisAlgorithmVersion: "terrain-grid-v2"`. Version 2 adds deterministic owned-surface extraction for same-ID region geometry and auxiliary label/centroid artwork; version 1 drafts require explicit original-source reanalysis. Each surface stores a stable ID, optional SVG element ID, measured geometry, automatic result and confidence, optional imported metadata result, optional host override, effective terrain, coast type, adjacent surface IDs, and port preference. `classificationSource` is computed as `host_override`, `metadata`, or `automatic`.
 
 Only effective land surfaces appear in the compatibility `mapDefinition`. Ocean, lake, and ignored surfaces never receive price, income, ownership, or claim edges. Coastal land defaults to `portAllowed: true`; explicit host disabling is preserved while the surface stays coastal. Inland or non-land surfaces are forced to false. Existing symmetric sea routes survive only when both endpoints remain coastal land; otherwise they are reported as invalidated.
 

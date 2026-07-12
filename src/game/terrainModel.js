@@ -4,7 +4,7 @@ export const TERRAIN_TYPES = Object.freeze(['land', 'ocean', 'lake', 'ignored'])
 export const CLASSIFICATION_SOURCES = Object.freeze(['automatic', 'metadata', 'host_override']);
 export const EDITOR_SCHEMA_VERSION = 1;
 export const METADATA_SCHEMA_VERSION = 1;
-export const ANALYSIS_ALGORITHM_VERSION = 'terrain-grid-v1';
+export const ANALYSIS_ALGORITHM_VERSION = 'terrain-grid-v2';
 
 const TERRAIN_SET = new Set(TERRAIN_TYPES);
 

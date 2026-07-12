@@ -1,25 +1,16 @@
-import { SAFE_REGION_ID, validateMapDefinition } from './mapValidation';
+import { validateMapDefinition } from './mapValidation';
 import { applyAutomaticPricing, PRICING_VERSION, summarizeRegionEconomy } from './pricing';
-import { boundsArea, measureRegionGeometry } from './svgGeometry';
+import { boundsArea } from './svgGeometry';
 import { inferBoundaryAdjacency } from './svgAdjacency';
+import { extractSurfaceCandidates, normalizeRegionId } from './surfaceCandidates';
+import { ANALYSIS_ALGORITHM_VERSION } from './terrainModel';
+
+export { normalizeRegionId } from './surfaceCandidates';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const PLAYABLE_SELECTOR = 'path,polygon,rect,circle,ellipse,polyline';
 const EXCLUDED_ANCESTORS = 'defs,clipPath,mask,pattern,marker,symbol';
 const DANGEROUS_ELEMENTS = 'script,foreignObject,iframe,object,embed,animate,animateMotion,animateTransform,set';
 const DECORATION_WORDS = /(^|[\s_-])(water|sea|ocean|lake|river|decor|decoration|background|frame|border)([\s_-]|$)/i;
-
-export function normalizeRegionId(value, fallback = 'region') {
-  let id = String(value || fallback)
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^A-Za-z0-9_-]+/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  if (!id) id = fallback;
-  if (!/^[A-Za-z_]/.test(id)) id = `region_${id}`;
-  return id.slice(0, 80);
-}
 
 function parseNumber(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -105,33 +96,17 @@ export function importSvgMap(svgText) {
   const document = parseSvgDocument(svgText);
   const svg = document.documentElement;
   const viewBox = parseViewBox(svg);
-  const candidates = [...svg.querySelectorAll(PLAYABLE_SELECTOR)].filter((element) => !isExplicitDecoration(element));
-  const explicit = candidates.filter((element) => element.getAttribute('data-region') === 'true');
+  const extracted = extractSurfaceCandidates(svg, { viewBox });
+  const candidates = extracted.records.filter((record) => !isExplicitDecoration(record.element));
+  const explicit = candidates.filter((record) => record.element.getAttribute('data-region') === 'true');
   const playable = explicit.length ? explicit : candidates;
-  const importIssues = [];
-  const sourceIds = new Set();
-  const safeIds = new Set();
-  const sourceToSafe = new Map();
+  const importIssues = [...extracted.importIssues];
+  const safeIds = new Set(playable.map((record) => record.id));
+  const sourceToSafe = extracted.sourceToId;
   const records = [];
 
-  playable.forEach((element, index) => {
-    const sourceId = element.getAttribute('id') || `region_${index + 1}`;
-    let id = normalizeRegionId(sourceId, `region_${index + 1}`);
-    if (sourceIds.has(sourceId)) {
-      importIssues.push({ severity: 'error', code: 'DUPLICATE_ID', message: `SVG içinde “${sourceId}” kimliği yineleniyor.` });
-    }
-    sourceIds.add(sourceId);
-    if (!SAFE_REGION_ID.test(sourceId)) {
-      importIssues.push({ severity: 'warning', code: 'NORMALIZED_ID', message: `“${sourceId}” güvenli “${id}” kimliğine dönüştürüldü.` });
-    }
-    if (safeIds.has(id)) {
-      importIssues.push({ severity: 'error', code: 'DUPLICATE_ID', message: `Birden fazla SVG kimliği “${id}” değerine dönüşüyor.` });
-      let suffix = 2;
-      while (safeIds.has(`${id}_${suffix}`)) suffix += 1;
-      id = `${id}_${suffix}`;
-    }
-    safeIds.add(id);
-    if (!sourceToSafe.has(sourceId)) sourceToSafe.set(sourceId, id);
+  playable.forEach((candidate) => {
+    const { element, sourceId, id } = candidate;
 
     const name = element.getAttribute('data-name') || element.getAttribute('name') || sourceId.replace(/[_-]+/g, ' ');
     const priceAttribute = element.getAttribute('data-price');
@@ -169,7 +144,7 @@ export function importSvgMap(svgText) {
     });
   });
 
-  const geometry = measureRegionGeometry(svg, records, viewBox);
+  const geometry = extracted.geometry;
   const priced = applyAutomaticPricing(records.map((record) => {
     const bounds = geometry.boundsById.get(record.id) || null;
     return { ...record, bounds, area: boundsArea(bounds) };
@@ -293,7 +268,7 @@ function newMapId() {
   return `map_${normalizeRegionId(random, 'local')}`;
 }
 
-export function validatePreparedMapRecord(record) {
+export function validatePreparedMapRecord(record, { allowOutdatedAnalysis = false } = {}) {
   if (!record || typeof record !== 'object') throw new Error('Yerel harita kaydı geçersiz.');
   if (typeof record.mapId !== 'string' || !record.mapId) throw new Error('Yerel harita kimliği geçersiz.');
   if (!record.terrainDocument || record.terrainDocument.mapId !== record.mapId) {
@@ -308,8 +283,14 @@ export function validatePreparedMapRecord(record) {
   if (record.fullMetadata?.mapId && record.fullMetadata.mapId !== record.mapId) {
     throw new Error('Yerel harita kimliği tam metadata ile eşleşmiyor.');
   }
+  const analysisIsOutdated = record.terrainDocument.analysisAlgorithmVersion !== ANALYSIS_ALGORITHM_VERSION;
+  if (analysisIsOutdated && !allowOutdatedAnalysis) {
+    throw new Error('Bu taslak önceki analiz algoritmasını kullanıyor. Düzenleyicide “Analizi Sıfırla” ile yeniden analiz et.');
+  }
   const validation = validateMapDefinition(record.mapDefinition);
-  if (!validation.valid) throw new Error(validation.errors[0]?.message || 'Yerel harita oyun tanımı geçersiz.');
+  if (!validation.valid && !(allowOutdatedAnalysis && analysisIsOutdated)) {
+    throw new Error(validation.errors[0]?.message || 'Yerel harita oyun tanımı geçersiz.');
+  }
   if (typeof record.baseSvg !== 'string' || !record.baseSvg.trim()) throw new Error('Yerel haritanın temel SVG kaydı eksik.');
   return record;
 }
@@ -332,9 +313,10 @@ export async function prepareSvgMap(svgText, options = {}) {
   const { buildCompatibilityMapDefinition, deriveTerrainDocument } = await import('./terrainModel');
 
   const originalSvg = String(svgText || '');
+  const forceReanalysis = options.forceReanalysis === true;
   const sanitizedOriginal = sanitizeSvgMarkup(originalSvg);
   const extracted = extractMapMetadata(sanitizedOriginal);
-  if (extracted.found && !extracted.valid) {
+  if (extracted.found && !extracted.valid && !forceReanalysis) {
     throw new MapMetadataConflictError(
       extracted.errors[0]?.message || 'Age of Paper metadata kaydı geçersiz.',
       'INVALID_EDITOR_METADATA',
@@ -344,9 +326,9 @@ export async function prepareSvgMap(svgText, options = {}) {
   const baseSvg = stripEditorMetadata(sanitizedOriginal);
   const baseSvgHash = await hashText(baseSvg);
   let terrainDocument;
-  let metadataStatus = extracted.found ? 'invalid' : 'absent';
+  let metadataStatus = forceReanalysis ? 'forced_reanalysis' : (extracted.found ? 'invalid' : 'absent');
 
-  if (extracted.found && extracted.valid) {
+  if (!forceReanalysis && extracted.found && extracted.valid) {
     if (extracted.metadata.sourceGeometryHash !== baseSvgHash) {
       if (options.metadataMismatch === 'reanalyze') {
         metadataStatus = 'geometry_mismatch_reanalyzed';
@@ -478,7 +460,10 @@ export async function rebuildPreparedMap(preparedMap, nextTerrainDocument, optio
     embedMapMetadata,
     hashText,
   } = await import('./mapMetadata');
-  const { buildCompatibilityMapDefinition, deriveTerrainDocument } = await import('./terrainModel');
+  const { ANALYSIS_ALGORITHM_VERSION, buildCompatibilityMapDefinition, deriveTerrainDocument } = await import('./terrainModel');
+  if (nextTerrainDocument.analysisAlgorithmVersion !== ANALYSIS_ALGORITHM_VERSION) {
+    throw new Error('Bu taslak önceki analiz algoritmasını kullanıyor. Önce “Analizi Sıfırla” ile yeniden analiz et.');
+  }
   let terrainDocument = deriveTerrainDocument({
     ...nextTerrainDocument,
     mapId: preparedMap.mapId,

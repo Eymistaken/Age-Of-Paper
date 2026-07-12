@@ -59,4 +59,24 @@ describe('automatic terrain analysis', () => {
     });
     expect(result.surfacesById.water_1.terrainType).toBe('ocean');
   });
+
+  it('analyzes same-id region and marker pairs as only the owned land surfaces', async () => {
+    const svg = `<svg viewBox="100 50 300 100" xmlns="http://www.w3.org/2000/svg">
+      <polygon id="R-1" points="100,50 200,50 200,150 100,150"/><circle id="R-1" cx="150" cy="100" r="3"/>
+      <polygon id="R-2" points="200,50 300,50 300,150 200,150"/><circle id="R-2" cx="250" cy="100" r="3"/>
+      <polygon id="R-3" points="300,50 400,50 400,150 300,150"/><circle id="R-3" cx="350" cy="100" r="3"/>
+    </svg>`;
+    const result = await analyzeSvgTerrain({ svgText: svg });
+    expect(result.surfaces.filter((surface) => !surface.synthetic).map((surface) => surface.id))
+      .toEqual(['R-1', 'R-2', 'R-3']);
+    expect(result.importIssues.filter((item) => item.code === 'AUXILIARY_ARTWORK')).toHaveLength(1);
+    expect(result.importIssues.some((item) => item.code === 'DUPLICATE_ID')).toBe(false);
+  });
+
+  it('keeps an explicitly marked circle playable even when its semantics look like a label', async () => {
+    const result = await analyzeSvgTerrain({
+      svgText: '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle id="island" class="label" data-terrain="land" cx="50" cy="50" r="30"/></svg>',
+    });
+    expect(result.surfacesById.island).toMatchObject({ terrainType: 'land', metadataTerrainType: 'land' });
+  });
 });

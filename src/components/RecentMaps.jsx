@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { rebuildPreparedMap, sanitizeSvgMarkup, validatePreparedMapRecord } from '../game/mapImporter';
+import { ANALYSIS_ALGORITHM_VERSION } from '../game/terrainModel';
 
 function safePreview(record) {
   try { return sanitizeSvgMarkup(record.thumbnail || record.sanitizedSvg || record.baseSvg || '<svg/>'); }
@@ -78,14 +79,15 @@ export function RecentMaps({ repository, onEdit, onUse, refreshToken = 0 }) {
       {maps.length ? <div className="aop-recent-map-grid">{maps.map((record) => {
         const summary = record.terrainDocument?.summary || {};
         const validation = record.validation;
+        const analysisIsCurrent = record.terrainDocument?.analysisAlgorithmVersion === ANALYSIS_ALGORITHM_VERSION;
         return (
           <article key={record.mapId} className="aop-recent-map-card">
             <div className="aop-recent-map-preview" aria-hidden="true" dangerouslySetInnerHTML={{ __html: safePreview(record) }} />
-            <div className="aop-recent-map-copy"><div className="aop-label">{record.sourceLabel || 'Yerel taslak'}</div><h4>{record.displayName}</h4><p>{relativeTime(record.updatedAt)} · {summary.playableLandCount ?? record.mapDefinition?.regionIds?.length ?? 0} kara</p><p>{summary.oceanCount || 0} okyanus · {summary.lakeCount || 0} göl · {summary.coastalLandCount || 0} kıyı</p><strong className={validation?.valid ? 'is-valid' : 'is-invalid'}>{validation?.valid ? 'Doğrulandı' : `${validation?.errors?.length || 0} hata`}</strong></div>
+            <div className="aop-recent-map-copy"><div className="aop-label">{record.sourceLabel || 'Yerel taslak'}</div><h4>{record.displayName}</h4><p>{relativeTime(record.updatedAt)} · {summary.playableLandCount ?? record.mapDefinition?.regionIds?.length ?? 0} kara</p><p>{summary.oceanCount || 0} okyanus · {summary.lakeCount || 0} göl · {summary.coastalLandCount || 0} kıyı</p><strong className={validation?.valid && analysisIsCurrent ? 'is-valid' : 'is-invalid'}>{!analysisIsCurrent ? 'Yeniden analiz gerekli' : validation?.valid ? 'Doğrulandı' : `${validation?.errors?.length || 0} hata`}</strong></div>
             <div className="aop-recent-map-actions">
-              <button type="button" disabled={busyId === record.mapId || !validation?.valid} onClick={() => onUse(record)}>Bu Odada Kullan</button>
+              <button type="button" disabled={busyId === record.mapId || !validation?.valid || !analysisIsCurrent} onClick={() => onUse(record)}>Bu Odada Kullan</button>
               <button type="button" disabled={busyId === record.mapId} onClick={() => onEdit(record)}>Düzenle</button>
-              <button type="button" disabled={busyId === record.mapId || !record.preparedSvg} onClick={() => exportPrepared(record)}>Dışa Aktar</button>
+              <button type="button" disabled={busyId === record.mapId || !record.preparedSvg || !analysisIsCurrent} onClick={() => exportPrepared(record)}>Dışa Aktar</button>
               <button type="button" disabled={busyId === record.mapId} onClick={() => duplicate(record)}>Çoğalt</button>
               <button type="button" disabled={busyId === record.mapId} onClick={() => remove(record)}>Sil</button>
             </div>

@@ -427,7 +427,7 @@ function App() {
     setLoading(true);
     setError('');
     try {
-      validatePreparedMapRecord(record);
+      validatePreparedMapRecord(record, { allowOutdatedAnalysis: true });
       setEditorRecord(record);
     } catch (openError) {
       setError(`Yerel harita doğrulanamadı: ${openError.message}`);

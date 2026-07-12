@@ -98,6 +98,26 @@ describe('setRoomMap content-addressed transaction', () => {
       message: expect.stringContaining('harita asset'),
     });
   });
+
+  it('applies a repaired ordinary map with same-id centroid markers to the room', async () => {
+    const prepared = await prepareSvgMap(`<svg viewBox="100 50 300 100" xmlns="http://www.w3.org/2000/svg">
+      <polygon id="R-1" points="100,50 200,50 200,150 100,150"/><circle id="R-1" cx="150" cy="100" r="3"/>
+      <polygon id="R-2" points="200,50 300,50 300,150 200,150"/><circle id="R-2" cx="250" cy="100" r="3"/>
+      <polygon id="R-3" points="300,50 400,50 400,150 300,150"/><circle id="R-3" cx="350" cy="100" r="3"/>
+    </svg>`, { displayName: 'Onarılmış Harita' });
+    expect(prepared.validation.valid).toBe(true);
+    await setRoomMap('ABCD', 'host', prepared);
+    const [, update] = firestore.update.mock.calls[0];
+    expect(update.mapDefinition.regionIds).toEqual(['R-1', 'R-2', 'R-3']);
+    expect(update.mapValidation.valid).toBe(true);
+  });
+
+  it('rejects a previous-version draft before starting a room transaction', async () => {
+    const prepared = await prepareSvgMap('<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle id="island" data-terrain="land" cx="50" cy="50" r="30"/></svg>');
+    prepared.terrainDocument = { ...prepared.terrainDocument, analysisAlgorithmVersion: 'terrain-grid-v1' };
+    await expect(setRoomMap('ABCD', 'host', prepared)).rejects.toMatchObject({ code: 'STALE_MAP_ANALYSIS' });
+    expect(firestore.runTransaction).not.toHaveBeenCalled();
+  });
 });
 
 describe('startGame map compatibility', () => {
