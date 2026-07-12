@@ -7,6 +7,7 @@ import {
   surfacesIntersectingMarquee,
   visitBrushSurface,
 } from '../game/editorSelection';
+import { revealEditorBounds } from '../game/editorCamera';
 
 function gridPath(surface, viewBox) {
   if (surface.geometry?.type !== 'grid_runs') return '';
@@ -66,13 +67,19 @@ export const TerrainMapCanvas = forwardRef(function TerrainMapCanvas({
     fit: () => setCamera(world),
     zoomIn: () => setCamera((current) => zoomCamera(current, 1.25, world)),
     zoomOut: () => setCamera((current) => zoomCamera(current, 0.8, world)),
+    revealSurface: (surfaceId) => {
+      const bounds = record.terrainDocument.surfacesById[surfaceId]?.bounds;
+      if (!bounds) return false;
+      setCamera((current) => revealEditorBounds(current, bounds, world));
+      return true;
+    },
     cancelGesture: () => {
       pointerRef.current = null;
       setMarquee(null);
       onGestureChange?.(false);
     },
     hasActiveGesture: () => Boolean(pointerRef.current || marquee),
-  }), [marquee, onGestureChange, world]);
+  }), [marquee, onGestureChange, record, world]);
 
   useEffect(() => {
     const svg = containerRef.current?.querySelector('.aop-terrain-art > svg');
@@ -247,7 +254,7 @@ export const TerrainMapCanvas = forwardRef(function TerrainMapCanvas({
       if (pointer.kind === 'press-select') {
         const next = applySurfaceClick(selectedRef.current, pointer.surfaceId, { ctrl: pointer.ctrl });
         onSelectionChange(next);
-        onInspect?.(pointer.surfaceId);
+        onInspect?.(next.includes(pointer.surfaceId) ? pointer.surfaceId : null);
       } else if (pointer.kind === 'press-marquee') {
         onSelectionChange(applySurfaceClick(selectedRef.current, null, { ctrl: pointer.ctrl }));
       } else if (pointer.kind === 'marquee') {

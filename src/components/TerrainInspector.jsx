@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { lowConfidenceReviewSurfaces } from '../game/terrainReview';
 
 const TERRAIN_LABELS = {
   land: 'Kara', ocean: 'Okyanus', lake: 'Göl', ignored: 'Yoksay',
@@ -40,17 +41,38 @@ export function TerrainInspector({
   onAnalyzeBoundary,
   boundaryPreview,
   onApplyBoundaryBatch,
+  onReviewSurface,
+  section: controlledSection,
+  onSectionChange,
+  classificationFocusRequest = 0,
 }) {
-  const [section, setSection] = useState('terrain');
+  const [internalSection, setInternalSection] = useState('terrain');
+  const [classificationEmphasis, setClassificationEmphasis] = useState(false);
+  const classificationRef = useRef(null);
+  const section = controlledSection || internalSection;
+  const setSection = (nextSection) => {
+    if (!controlledSection) setInternalSection(nextSection);
+    onSectionChange?.(nextSection);
+  };
   const [boundaryTerrain, setBoundaryTerrain] = useState('');
   const [interiorTerrain, setInteriorTerrain] = useState('');
   const [outsideEnabled, setOutsideEnabled] = useState(false);
   const [outsideTerrain, setOutsideTerrain] = useState('land');
   const selected = document.surfacesById[inspectedId] || document.surfacesById[selectedIds.at(-1)];
   const selectedSurfaces = useMemo(() => selectedIds.map((id) => document.surfacesById[id]).filter(Boolean), [document, selectedIds]);
-  const lowConfidence = useMemo(() => document.surfaces.filter((surface) => surface.classificationSource === 'automatic' && surface.confidence < 0.65), [document]);
+  const lowConfidence = useMemo(() => lowConfidenceReviewSurfaces(document), [document]);
   const coastalLands = useMemo(() => document.surfaces.filter((surface) => surface.terrainType === 'land' && surface.coastType !== 'none'), [document]);
   const disabledPorts = useMemo(() => coastalLands.filter((surface) => !surface.portAllowed), [coastalLands]);
+
+  useEffect(() => {
+    if (!classificationFocusRequest || section !== 'terrain') return undefined;
+    const panel = classificationRef.current;
+    panel?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    panel?.querySelector('button:not([disabled])')?.focus();
+    setClassificationEmphasis(true);
+    const timer = window.setTimeout(() => setClassificationEmphasis(false), 1_200);
+    return () => window.clearTimeout(timer);
+  }, [classificationFocusRequest, section]);
 
   return (
     <aside className="aop-terrain-inspector" aria-label="Harita düzenleyici denetçisi">
@@ -74,9 +96,31 @@ export function TerrainInspector({
           <section className="aop-analysis-review">
             <div className="aop-label">Düşük güvenli yüzeyler</div>
             <p><strong>{lowConfidence.length}</strong> otomatik sonuç inceleme eşiğinin altında.</p>
-            {lowConfidence.length > 0 && <ul>{lowConfidence.slice(0, 8).map((surface) => <li key={surface.id}>{surface.name} · %{Math.round(surface.confidence * 100)}</li>)}</ul>}
+            {lowConfidence.length > 0 && (
+              <ul className="aop-review-list" aria-label="Düşük güvenli yüzey inceleme listesi">
+                {lowConfidence.map((surface) => {
+                  const isSelected = selectedIds.includes(surface.id);
+                  return (
+                    <li key={surface.id}>
+                      <button
+                        type="button"
+                        className="aop-review-surface"
+                        data-surface-id={surface.id}
+                        aria-pressed={isSelected}
+                        onClick={() => { setSection('terrain'); onReviewSurface?.(surface.id); }}
+                      >
+                        <span aria-hidden="true" className="aop-review-marker">{isSelected ? '◆' : '◇'}</span>
+                        <span>{surface.name}</span>
+                        <small>%{Math.round(surface.automatic.confidence * 100)}</small>
+                        {isSelected && <strong>Seçili</strong>}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </section>
-          <section>
+          <section ref={classificationRef} className={`aop-classification-panel ${classificationEmphasis ? 'is-emphasized' : ''}`}>
             <div className="aop-label">Seçimi Sınıflandır</div>
             <div className="aop-terrain-choice-grid">
               {Object.entries(TERRAIN_LABELS).map(([value, label]) => (
@@ -91,8 +135,8 @@ export function TerrainInspector({
           {selectedIds.length > 0 && (
             <section className="aop-boundary-panel">
               <div className="aop-label">Kalıcı Seçim</div>
-              <p>{selectedIds.length} yüzey seçili. Seçimi önerilen bir sınır olarak inceleyebilirsin.</p>
-              <button type="button" className="aop-button-secondary" onClick={onAnalyzeBoundary}>Sınır ve İç Alanı Analiz Et</button>
+              <p>{selectedIds.length} yüzey seçili. İçini doldurmak istediğin alanın tamamını değil, bitişik yüzeylerden oluşan bağlı bir halka seçmelisin.</p>
+              <button type="button" className="aop-button-secondary" onClick={onAnalyzeBoundary}>Seçimi Sınır Halkası Olarak Analiz Et</button>
               {boundaryPreview && (
                 <div className={`aop-boundary-result ${boundaryPreview.valid ? 'is-valid' : 'is-invalid'}`}>
                   {boundaryPreview.valid ? (

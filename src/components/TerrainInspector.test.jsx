@@ -37,10 +37,10 @@ afterEach(async () => {
   container.remove();
 });
 
-async function renderInspector(selectedIds = [], inspectedId = null) {
+async function renderInspector(selectedIds = [], inspectedId = null, overrides = {}) {
   await act(async () => root.render(
     <TerrainInspector
-      document={documentValue}
+      document={overrides.document || documentValue}
       selectedIds={selectedIds}
       inspectedId={inspectedId}
       onClassify={vi.fn()}
@@ -49,6 +49,10 @@ async function renderInspector(selectedIds = [], inspectedId = null) {
       onAnalyzeBoundary={vi.fn()}
       boundaryPreview={null}
       onApplyBoundaryBatch={vi.fn()}
+      onReviewSurface={overrides.onReviewSurface || vi.fn()}
+      section={overrides.section}
+      onSectionChange={overrides.onSectionChange}
+      classificationFocusRequest={overrides.classificationFocusRequest || 0}
     />,
   ));
 }
@@ -81,5 +85,34 @@ describe('terrain inspector responsibility split', () => {
     expect(container.textContent).toContain('Liman izni');
     expect(container.textContent).toContain('Devre dışı');
     expect(container.textContent).not.toContain('Otomatik tahmin');
+  });
+
+  it('renders the complete sorted low-confidence review list as pressed keyboard buttons', async () => {
+    const surfaces = [
+      { id: 'z', name: 'Zemin', automatic: { terrainType: 'land', confidence: 0.4 }, adjacentSurfaceIds: [] },
+      { id: 'b', name: 'Ada', automatic: { terrainType: 'land', confidence: 0.2 }, adjacentSurfaceIds: [] },
+      { id: 'a', name: 'Ada', automatic: { terrainType: 'land', confidence: 0.2 }, adjacentSurfaceIds: [] },
+      ...Array.from({ length: 7 }, (_, index) => ({
+        id: `extra_${index}`, name: `Yüzey ${index}`, automatic: { terrainType: 'land', confidence: 0.3 + index / 100 }, adjacentSurfaceIds: [],
+      })),
+    ];
+    const reviewDocument = deriveTerrainDocument({
+      mapId: 'map_review', displayName: 'Review', revision: 1,
+      viewBox: { x: 0, y: 0, width: 100, height: 50 }, surfaces,
+    });
+    const onReviewSurface = vi.fn();
+    const onSectionChange = vi.fn();
+    await renderInspector(['a'], 'a', { document: reviewDocument, onReviewSurface, onSectionChange });
+    const rows = [...container.querySelectorAll('.aop-review-surface')];
+    expect(rows).toHaveLength(10);
+    expect(rows.map((row) => row.dataset.surfaceId)).toEqual(['a', 'b', 'extra_0', 'extra_1', 'extra_2', 'extra_3', 'extra_4', 'extra_5', 'extra_6', 'z']);
+    expect(rows[0].tagName).toBe('BUTTON');
+    expect(rows[0].getAttribute('aria-pressed')).toBe('true');
+    expect(rows[0].textContent).toContain('Seçili');
+    rows.at(-1).focus();
+    expect(document.activeElement).toBe(rows.at(-1));
+    await act(async () => rows.at(-1).click());
+    expect(onSectionChange).toHaveBeenCalledWith('terrain');
+    expect(onReviewSurface).toHaveBeenCalledWith('z');
   });
 });

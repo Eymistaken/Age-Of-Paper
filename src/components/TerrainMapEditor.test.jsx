@@ -83,6 +83,16 @@ describe('terrain map editor workspace', () => {
     expect(land.hasAttribute('data-editor-selected')).toBe(false);
   });
 
+  it('clears the inspected surface when Ctrl toggles it out of the selection', async () => {
+    await renderEditor();
+    const land = document.querySelector('.aop-terrain-art #land_a');
+    await act(async () => { pointerEvent('pointerdown', land); pointerEvent('pointerup', land); });
+    expect(document.querySelector('.aop-surface-facts h3').textContent).toBe('land a');
+    await act(async () => { pointerEvent('pointerdown', land, { ctrlKey: true }); pointerEvent('pointerup', land, { ctrlKey: true }); });
+    expect(document.querySelector('.aop-selection-bar')).toBeNull();
+    expect(document.querySelector('.aop-surface-facts')).toBeNull();
+  });
+
   it('does not save on open or unchanged close', async () => {
     vi.useFakeTimers();
     const save = vi.spyOn(repository, 'savePreparedMap');
@@ -138,8 +148,10 @@ describe('terrain map editor workspace', () => {
     await act(async () => { document.querySelector('[aria-label="Taslağı hemen yerel olarak kaydet"]').click(); await settlePromises(); });
     expect(document.body.textContent).toContain('Yerel kayıt başarısız');
     expect(save).toHaveBeenCalledOnce();
-    await act(async () => { document.querySelector('[aria-label="Taslağı hemen yerel olarak kaydet"]').click(); await settlePromises(); });
-    expect(save).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      document.querySelector('[aria-label="Taslağı hemen yerel olarak kaydet"]').click();
+      await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2), { timeout: 1_000, interval: 1 });
+    });
     expect(document.body.textContent).toContain('Yerel olarak kaydedildi');
     const stored = await repository.getPreparedMap(prepared.mapId);
     expect(stored).toMatchObject(originalIdentity);
@@ -191,6 +203,75 @@ describe('terrain map editor workspace', () => {
     expect(onApply).not.toHaveBeenCalled();
     await act(async () => { [...document.querySelectorAll('button')].find((button) => button.textContent === 'Odaya Uygula').click(); await settlePromises(); });
     expect(onApply).toHaveBeenCalledOnce();
+  });
+
+  it('uses a low-confidence row to replace selection, highlight, inspect and reveal without editing terrain', async () => {
+    prepared = await prepareSvgMap('<svg viewBox="0 0 1000 100" xmlns="http://www.w3.org/2000/svg"><rect id="alpha" x="0" width="80" height="100"/><rect id="omega" x="920" width="80" height="100"/></svg>', { displayName: 'Review' });
+    await renderEditor();
+    const zoomIn = document.querySelector('[aria-label="Yakınlaştır"]');
+    await act(async () => { zoomIn.click(); zoomIn.click(); });
+    const artSvg = document.querySelector('.aop-terrain-art > svg');
+    const beforeViewBox = artSvg.getAttribute('viewBox');
+    const omegaRow = [...document.querySelectorAll('.aop-review-surface')].find((row) => row.dataset.surfaceId === 'omega');
+    expect(omegaRow).toBeDefined();
+    const terrainBefore = document.querySelector('.aop-terrain-art #omega').getAttribute('data-editor-terrain');
+    await act(async () => omegaRow.click());
+    expect(omegaRow.getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelector('.aop-terrain-art #omega').getAttribute('data-editor-selected')).toBe('true');
+    expect(document.querySelector('.aop-surface-facts h3').textContent).toBe('omega');
+    expect(artSvg.getAttribute('viewBox')).not.toBe(beforeViewBox);
+    expect(document.querySelector('.aop-terrain-art #omega').getAttribute('data-editor-terrain')).toBe(terrainBefore);
+    expect(document.querySelector('[aria-label="Geri al"]').disabled).toBe(true);
+  });
+
+  it.each([['desktop', 1280], ['mobile', 390]])('opens and focuses terrain classification controls on %s', async (_label, viewportWidth) => {
+    vi.useFakeTimers();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: viewportWidth });
+    Element.prototype.scrollIntoView.mockClear();
+    await renderEditor();
+    const land = document.querySelector('.aop-terrain-art #land_a');
+    await act(async () => { pointerEvent('pointerdown', land); pointerEvent('pointerup', land); });
+    await act(async () => [...document.querySelectorAll('[role="tab"]')].find((button) => button.textContent === 'Kıyılar ve Limanlar').click());
+    const action = [...document.querySelectorAll('.aop-selection-bar button')].find((button) => button.textContent === 'Seçileni Sınıflandır');
+    await act(async () => action.click());
+    expect(document.querySelector('.aop-editor-inspector-wrap').classList.contains('is-open')).toBe(true);
+    expect([...document.querySelectorAll('[role="tab"]')].find((button) => button.textContent === 'Arazi Analizi').getAttribute('aria-selected')).toBe('true');
+    expect(document.querySelector('.aop-classification-panel').classList.contains('is-emphasized')).toBe(true);
+    expect(document.activeElement.textContent).toBe('Kara');
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(1_400));
+    expect(document.querySelector('.aop-classification-panel').classList.contains('is-emphasized')).toBe(false);
+  });
+
+  it('classifies every selected surface as one undoable command', async () => {
+    await renderEditor();
+    const land = document.querySelector('.aop-terrain-art #land_a');
+    const water = document.querySelector('.aop-terrain-art #water_1');
+    await act(async () => { pointerEvent('pointerdown', land); pointerEvent('pointerup', land); });
+    await act(async () => { pointerEvent('pointerdown', water, { ctrlKey: true }); pointerEvent('pointerup', water, { ctrlKey: true }); });
+    expect(document.querySelector('.aop-selection-bar strong').textContent).toContain('2 yüzey');
+    await act(async () => [...document.querySelectorAll('.aop-selection-bar button')].find((button) => button.textContent === 'Seçileni Sınıflandır').click());
+    await act(async () => [...document.querySelectorAll('.aop-terrain-choice-grid button')].find((button) => button.textContent === 'Göl').click());
+    expect(land.getAttribute('data-editor-terrain')).toBe('lake');
+    expect(water.getAttribute('data-editor-terrain')).toBe('lake');
+    await act(async () => document.querySelector('[aria-label="Geri al"]').click());
+    expect(land.getAttribute('data-editor-terrain')).toBe('land');
+    expect(water.getAttribute('data-editor-terrain')).toBe('ocean');
+  });
+
+  it('shares the explanatory boundary-ring action and clears stale analysis on replacement', async () => {
+    await renderEditor();
+    const land = document.querySelector('.aop-terrain-art #land_a');
+    const water = document.querySelector('.aop-terrain-art #water_1');
+    await act(async () => { pointerEvent('pointerdown', land); pointerEvent('pointerup', land); });
+    expect(document.body.textContent).toContain('bitişik yüzeylerden oluşan bağlı bir halka');
+    const ringActions = [...document.querySelectorAll('button')].filter((button) => button.textContent === 'Seçimi Sınır Halkası Olarak Analiz Et');
+    expect(ringActions).toHaveLength(2);
+    await act(async () => ringActions[0].click());
+    expect(document.querySelector('.aop-boundary-result [role="alert"]').textContent).toContain('2 seçili komşu');
+    await act(async () => { pointerEvent('pointerdown', water); pointerEvent('pointerup', water); });
+    expect(document.querySelector('.aop-boundary-result')).toBeNull();
+    expect(document.querySelector('.aop-surface-facts h3').textContent).toBe('water 1');
   });
 
   it('handles Ctrl+Z/Y before browser history and follows the Escape hierarchy', async () => {

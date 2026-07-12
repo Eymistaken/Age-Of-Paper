@@ -26,6 +26,10 @@ function triggerSvgDownload(svg, filename) {
   URL.revokeObjectURL(url);
 }
 
+function sameSelection(first, second) {
+  return first.length === second.length && first.every((id, index) => id === second[index]);
+}
+
 export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, onDraftChange }) {
   const titleId = useId();
   const descriptionId = useId();
@@ -58,6 +62,8 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [inspectorSection, setInspectorSection] = useState('terrain');
+  const [classificationFocusRequest, setClassificationFocusRequest] = useState(0);
   const [displayName, setDisplayName] = useState(initialRecord.displayName);
   const editorDocument = history.present;
   const previewDocument = batchPreview?.document || editorDocument;
@@ -142,6 +148,31 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
     setBatchPreview(null);
   };
 
+  const changeSelection = useCallback((nextIds) => {
+    const normalized = [...new Set(nextIds || [])];
+    if (!sameSelection(selectedIds, normalized)) {
+      setBoundaryPreview(null);
+      setBatchPreview(null);
+      setInspectedId((current) => normalized.includes(current) ? current : null);
+    }
+    setSelectedIds(normalized);
+  }, [selectedIds]);
+
+  const reviewSurface = useCallback((surfaceId) => {
+    if (!editorDocument.surfacesById[surfaceId]) return;
+    changeSelection([surfaceId]);
+    setInspectedId(surfaceId);
+    setInspectorSection('terrain');
+    setInspectorOpen(true);
+    canvasRef.current?.revealSurface(surfaceId);
+  }, [changeSelection, editorDocument.surfacesById]);
+
+  const openClassification = useCallback(() => {
+    setInspectorSection('terrain');
+    setInspectorOpen(true);
+    setClassificationFocusRequest((current) => current + 1);
+  }, []);
+
   const requestClose = useCallback(async () => {
     if (pending) return;
     window.clearTimeout(saveTimerRef.current);
@@ -207,7 +238,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
       if (event.key === 'Escape') {
         event.preventDefault();
         if (cancelTopOperation()) return;
-        if (selectedIds.length) { setSelectedIds([]); setInspectedId(null); return; }
+        if (selectedIds.length) { changeSelection([]); return; }
         requestClose();
         return;
       }
@@ -238,7 +269,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
       document.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('keyup', onKeyUp, true);
     };
-  }, [cancelTopOperation, requestClose, selectedIds.length]);
+  }, [cancelTopOperation, changeSelection, requestClose, selectedIds.length]);
 
   const classifySelection = (terrainType) => commitDocument({
     ...editorDocument,
@@ -261,7 +292,11 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
       : surface),
   }, allowed ? 'Liman iznini aç' : 'Liman iznini kapat');
 
-  const analyzeBoundary = () => setBoundaryPreview(analyzeSelectedBoundary(editorDocument, selectedIds));
+  const analyzeBoundary = useCallback(() => {
+    setInspectorSection('terrain');
+    setInspectorOpen(true);
+    setBoundaryPreview(analyzeSelectedBoundary(editorDocument, selectedIds));
+  }, [editorDocument, selectedIds]);
 
   const previewBoundaryBatch = (choices) => {
     const groups = [
@@ -378,7 +413,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
               ref={canvasRef}
               record={canvasRecord}
               selectedIds={selectedIds}
-              onSelectionChange={setSelectedIds}
+              onSelectionChange={changeSelection}
               onInspect={setInspectedId}
               tool={tool}
               temporaryHand={temporaryHand}
@@ -388,7 +423,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
               boundaryPreview={boundaryPreview?.valid ? boundaryPreview : null}
             />
             {tool === 'brush' && <div className="aop-touch-brush-mode" role="group" aria-label="Dokunmatik fırça modu"><button type="button" aria-pressed={brushMode === 'add'} onClick={() => setBrushMode('add')}>Ekle</button><button type="button" aria-pressed={brushMode === 'subtract'} onClick={() => setBrushMode('subtract')}>Çıkar</button></div>}
-            {selectedIds.length > 0 && <div className="aop-selection-bar"><strong>{selectedIds.length} yüzey seçili</strong><button type="button" onClick={() => setInspectorOpen(true)}>Sınıflandır</button><button type="button" onClick={analyzeBoundary}>Sınır ve İçi Analiz Et</button><button type="button" onClick={() => { setSelectedIds([]); setInspectedId(null); }}>Temizle</button></div>}
+            {selectedIds.length > 0 && <div className="aop-selection-bar"><strong>{selectedIds.length} yüzey seçili</strong><button type="button" onClick={openClassification}>Seçileni Sınıflandır</button><button type="button" onClick={analyzeBoundary}>Seçimi Sınır Halkası Olarak Analiz Et</button><span className="aop-selection-ring-hint">Dolu alanı değil, bitişik yüzeylerden oluşan bağlı bir halka seç.</span><button type="button" onClick={() => changeSelection([])}>Temizle</button></div>}
           </main>
 
           <div className={`aop-editor-inspector-wrap ${inspectorOpen ? 'is-open' : ''}`}>
@@ -403,6 +438,10 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
               onAnalyzeBoundary={analyzeBoundary}
               boundaryPreview={boundaryPreview}
               onApplyBoundaryBatch={previewBoundaryBatch}
+              onReviewSurface={reviewSurface}
+              section={inspectorSection}
+              onSectionChange={setInspectorSection}
+              classificationFocusRequest={classificationFocusRequest}
             />
           </div>
         </div>

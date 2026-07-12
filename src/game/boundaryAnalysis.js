@@ -14,31 +14,65 @@ function flood(seeds, allowed, byId) {
   return seen;
 }
 
+function componentCount(ids, byId) {
+  const remaining = new Set(ids);
+  let count = 0;
+  while (remaining.size) {
+    const component = flood([[...remaining][0]], remaining, byId);
+    component.forEach((id) => remaining.delete(id));
+    count += 1;
+  }
+  return count;
+}
+
 export function analyzeSelectedBoundary(document, selectedIds) {
   const byId = document.surfacesById || Object.fromEntries((document.surfaces || []).map((surface) => [surface.id, surface]));
   const boundary = new Set(selectedIds.filter((id) => byId[id]));
   const all = new Set(Object.keys(byId));
   const remaining = new Set([...all].filter((id) => !boundary.has(id)));
-  const connectedBoundary = boundary.size > 0 && flood([[...boundary][0]], boundary, byId).size === boundary.size;
-  const cycleLike = [...boundary].every((id) => (
-    (byId[id].adjacentSurfaceIds || []).filter((neighbor) => boundary.has(neighbor)).length >= 2
+  const invalid = (reasonCode, reason, outsideIds = [...remaining]) => ({
+    valid: false,
+    reasonCode,
+    reason,
+    boundaryIds: [...boundary],
+    interiorIds: [],
+    outsideIds,
+  });
+  if (!boundary.size) return invalid('EMPTY_BOUNDARY', 'Analiz için bitişik yüzeylerden oluşan kapalı bir sınır halkası seç.');
+  if (!remaining.size) return invalid('NO_OUTSIDE', 'Her yüzey seçildiği için sınırın dışında kalacak bir dış alan kalmadı.', []);
+
+  const connectedSize = flood([[...boundary][0]], boundary, byId).size;
+  if (connectedSize !== boundary.size) {
+    const components = componentCount(boundary, byId);
+    return invalid('DISCONNECTED_BOUNDARY', `Seçim ${components} bağlantısız bileşen içeriyor; sınır halkası tek ve bağlı olmalı.`);
+  }
+  const endpoints = [...boundary].filter((id) => (
+    (byId[id].adjacentSurfaceIds || []).filter((neighbor) => boundary.has(neighbor)).length < 2
   ));
+  if (endpoints.length) {
+    return invalid('BOUNDARY_ENDPOINTS', `Bir kapalı sınır halkası için her seçili yüzeyin en az 2 seçili komşusu olmalı; ${endpoints.length} yüzey bu koşulu sağlamıyor.`);
+  }
   const outsideSeeds = [...remaining].filter((id) => (
     byId[id].touchesRootBoundary === true
     || byId[id].terrainType === 'ocean'
     || byId[id].automatic?.terrainType === 'ocean'
   ));
+  if (!outsideSeeds.length) {
+    return invalid('NO_OUTSIDE_COMPONENT', 'Seçim dışında yüzeyler var ancak root sınırına veya okyanusa bağlı güvenilir bir dış alan bulunamadı.');
+  }
   const outside = flood(outsideSeeds, remaining, byId);
+  if (!outside.size) return invalid('NO_OUTSIDE_COMPONENT', 'Sınır halkasının dışında güvenilir bir alan tespit edilemedi.');
   const interior = new Set([...remaining].filter((id) => !outside.has(id)));
-  const valid = connectedBoundary && cycleLike && outside.size > 0 && interior.size > 0;
+  if (!interior.size) {
+    return invalid('NO_INTERIOR', 'Seçim bağlı görünüyor ancak halkayla çevrelenmiş algılanabilir bir iç alan yok; dolu alanı değil yalnız sınır halkasını seç.');
+  }
   return {
-    valid,
+    valid: true,
+    reasonCode: null,
     boundaryIds: [...boundary],
-    interiorIds: valid ? [...interior] : [],
-    outsideIds: valid ? [...outside] : [...remaining],
-    reason: valid ? '' : !connectedBoundary || !cycleLike
-      ? 'Seçilen yüzeyler kapalı ve kesintisiz bir sınır oluşturmuyor.'
-      : 'Sınırın içi ve dışı güvenilir biçimde ayrılamadı.',
+    interiorIds: [...interior],
+    outsideIds: [...outside],
+    reason: '',
   };
 }
 

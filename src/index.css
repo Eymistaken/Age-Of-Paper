@@ -452,6 +452,7 @@
 .aop-selection-bar { position: absolute; z-index: 6; bottom: 12px; left: 50%; display: flex; max-width: calc(100% - 24px); align-items: center; gap: 6px; transform: translateX(-50%); padding: 5px; border: 1px solid var(--aop-gold-deep); border-radius: 4px; background: rgba(25,24,19,.96); box-shadow: 0 7px 22px rgba(0,0,0,.45); }
 .aop-selection-bar strong { padding: 0 8px; color: var(--aop-paper-light); font-size: .7rem; white-space: nowrap; }
 .aop-selection-bar button { min-height: 36px; white-space: nowrap; }
+.aop-selection-ring-hint { max-width: 220px; color: var(--aop-muted); font-size: .58rem; line-height: 1.25; }
 .aop-editor-inspector-wrap { min-width: 0; min-height: 0; overflow: hidden; border-left: 1px solid var(--aop-line); background: #1c1b15; }
 .aop-terrain-inspector { display: grid; height: 100%; min-height: 0; grid-template-rows: auto minmax(0,1fr); }
 .aop-inspector-tabs { display: grid; grid-template-columns: 1fr 1fr; padding: 8px; border-bottom: 1px solid var(--aop-line); }
@@ -479,6 +480,18 @@
 .aop-analysis-review ul,.aop-coastal-eligibility ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .aop-analysis-review li,.aop-coastal-eligibility li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 7px; border-left: 2px solid var(--aop-bronze); background: rgba(255,255,255,.025); color: var(--aop-paper-light); font-size: .64rem; }
 .aop-coastal-eligibility li strong { color: var(--aop-gold); font-size: .59rem; }
+.aop-analysis-review .aop-review-list { display: grid; max-height: min(32dvh,280px); gap: 4px; overflow-y: auto; overscroll-behavior: contain; padding: 2px 4px 2px 2px; scrollbar-gutter: stable; }
+.aop-analysis-review .aop-review-list li { display: block; padding: 0; border: 0; background: transparent; }
+.aop-review-surface { display: grid; width: 100%; min-height: 42px; grid-template-columns: 18px minmax(0,1fr) auto auto; align-items: center; gap: 7px; padding: 6px 8px; border: 1px solid var(--aop-line); border-left: 3px solid var(--aop-bronze); border-radius: 2px; background: #171812; color: var(--aop-paper-light); text-align: left; }
+.aop-review-surface:hover { border-color: var(--aop-bronze); background: #242218; }
+.aop-review-surface[aria-pressed="true"] { border-style: double; border-color: var(--aop-paper-light); border-left-color: var(--aop-gold); background: #302918; }
+.aop-review-surface:focus-visible { outline: 3px double var(--aop-paper-light); outline-offset: 3px; box-shadow: 0 0 0 6px rgba(224,173,69,.18); }
+.aop-review-marker { color: var(--aop-gold); font-size: .8rem; text-align: center; }
+.aop-review-surface small { color: var(--aop-muted); font-variant-numeric: tabular-nums; }
+.aop-review-surface strong { padding: 2px 4px; border: 1px solid var(--aop-gold-deep); color: var(--aop-paper-light); font-size: .52rem; text-transform: uppercase; }
+.aop-classification-panel { position: relative; }
+.aop-classification-panel.is-emphasized { animation: aop-classification-callout 1.2s ease-out; outline: 3px double var(--aop-gold); outline-offset: 3px; }
+@keyframes aop-classification-callout { 0% { box-shadow: 0 0 0 0 rgba(224,173,69,.55),inset 5px 0 0 var(--aop-gold); } 100% { box-shadow: 0 0 0 12px rgba(224,173,69,0),inset 5px 0 0 rgba(224,173,69,0); } }
 .aop-boundary-panel p,.aop-boundary-result p { margin: 0; color: var(--aop-muted); font-size: .68rem; line-height: 1.45; }
 .aop-boundary-result { display: grid; gap: 8px; padding: 9px; border: 1px solid var(--aop-line); }
 .aop-boundary-result.is-valid { border-color: var(--aop-success); }.aop-boundary-result.is-invalid { border-color: var(--aop-danger); }
@@ -524,6 +537,7 @@
   .aop-terrain-statusbar { display: none; }
   .aop-editor-view-toggle { top: 7px; }.aop-editor-view-toggle button { padding: 5px 7px; font-size: .56rem; }
   .aop-selection-bar { bottom: 8px; width: calc(100% - 12px); overflow-x: auto; justify-content: flex-start; transform: translateX(-50%); }.aop-selection-bar strong { position: sticky; left: 0; background: rgba(25,24,19,.96); }
+  .aop-selection-ring-hint { min-width: 190px; }
   .aop-touch-brush-mode { right: 6px; bottom: 62px; }
   .aop-recent-maps { padding: 12px; }.aop-recent-map-grid { grid-template-columns: 1fr; }.aop-recent-map-card { grid-template-columns: 110px minmax(0,1fr); grid-template-rows: auto auto; }.aop-recent-map-preview { grid-row: 1 / span 2; min-height: 150px; border-right: 1px solid var(--aop-bronze); border-bottom: 0; }.aop-recent-map-actions { grid-column: 2; grid-template-columns: repeat(5,1fr); }
 }
