@@ -5,7 +5,7 @@ import { inferBoundaryAdjacency } from './svgAdjacency';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const PLAYABLE_SELECTOR = 'path,polygon,rect,circle,ellipse,polyline';
-const EXCLUDED_ANCESTORS = 'defs,clipPath,mask,pattern,marker,symbol';
+const EXCLUDED_ANCESTORS = 'defs,clipPath,mask,pattern,marker,symbol,g[id*="point"],g[id*="label"],g[class*="point"],g[class*="label"],g[id*="marker"],g[id*="anchor"],g[id*="calibration"],g[id*="legend"],g[id*="scale"]';
 const DANGEROUS_ELEMENTS = 'script,foreignObject,iframe,object,embed,animate,animateMotion,animateTransform,set';
 const DECORATION_WORDS = /(^|[\s_-])(water|sea|ocean|lake|river|decor|decoration|background|frame|border)([\s_-]|$)/i;
 

@@ -4,7 +4,7 @@ import { measureRegionGeometry } from './svgGeometry';
 import { deriveTerrainDocument, TERRAIN_TYPES } from './terrainModel';
 
 const SHAPE_SELECTOR = 'path,polygon,rect,circle,ellipse,polyline';
-const EXCLUDED_ANCESTORS = 'defs,clipPath,mask,pattern,marker,symbol';
+const EXCLUDED_ANCESTORS = 'defs,clipPath,mask,pattern,marker,symbol,g[id*="point"],g[id*="label"],g[class*="point"],g[class*="label"],g[id*="marker"],g[id*="anchor"],g[id*="calibration"],g[id*="legend"],g[id*="scale"]';
 const TERRAIN_SET = new Set(TERRAIN_TYPES);
 const LAKE_WORDS = /(^|[\s_-])(lake|pond|reservoir)([\s_-]|$)/i;
 const OCEAN_WORDS = /(^|[\s_-])(water|sea|ocean)([\s_-]|$)/i;
