@@ -70,6 +70,8 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
   latestRecordRef.current = record;
   latestDocumentRef.current = editorDocument;
   onDraftChangeRef.current = onDraftChange;
+  const historyRef = useRef(history);
+  historyRef.current = history;
   const analysisIsCurrent = editorDocument.analysisAlgorithmVersion === ANALYSIS_ALGORITHM_VERSION;
   const currentValidation = useMemo(() => {
     const validation = validateMapDefinition(buildCompatibilityMapDefinition(editorDocument));
@@ -157,12 +159,46 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
     return () => window.clearTimeout(saveTimerRef.current);
   }, [flushDraft, history.present]);
 
-  const commitDocument = (next, label) => {
-    setHistory((current) => executeCommand(current, deriveTerrainDocument(next), label));
+  const handleUndo = useCallback(() => {
+    const next = undo(historyRef.current);
+    latestDocumentRef.current = next.present;
+    localDirtyRef.current = next.present !== lastSavedDocumentRef.current;
+    if (localDirtyRef.current) {
+      setSaveStatus('Kaydedilmemiş değişiklikler');
+    } else {
+      setSaveStatus('Yerel olarak kaydedildi');
+    }
+    setHistory(next);
+    setDirtyRoom(true);
+  }, []);
+
+  const handleRedo = useCallback(() => {
+    const next = redo(historyRef.current);
+    latestDocumentRef.current = next.present;
+    localDirtyRef.current = next.present !== lastSavedDocumentRef.current;
+    if (localDirtyRef.current) {
+      setSaveStatus('Kaydedilmemiş değişiklikler');
+    } else {
+      setSaveStatus('Yerel olarak kaydedildi');
+    }
+    setHistory(next);
+    setDirtyRoom(true);
+  }, []);
+
+  const commitDocument = useCallback((next, label) => {
+    const nextDoc = deriveTerrainDocument(next);
+    latestDocumentRef.current = nextDoc;
+    localDirtyRef.current = nextDoc !== lastSavedDocumentRef.current;
+    if (localDirtyRef.current) {
+      setSaveStatus('Kaydedilmemiş değişiklikler');
+    } else {
+      setSaveStatus('Yerel olarak kaydedildi');
+    }
+    setHistory((current) => executeCommand(current, nextDoc, label));
     setDirtyRoom(true);
     setBoundaryPreview(null);
     setBatchPreview(null);
-  };
+  }, []);
 
   const changeSelection = useCallback((nextIds) => {
     const normalized = [...new Set(nextIds || [])];
@@ -260,14 +296,12 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
       }
       if (event.ctrlKey && event.key.toLowerCase() === 'z') {
         event.preventDefault();
-        setHistory((current) => undo(current));
-        setDirtyRoom(true);
+        handleUndo();
         return;
       }
       if (event.ctrlKey && event.key.toLowerCase() === 'y') {
         event.preventDefault();
-        setHistory((current) => redo(current));
-        setDirtyRoom(true);
+        handleRedo();
         return;
       }
       if (typing) return;
@@ -285,7 +319,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
       document.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('keyup', onKeyUp, true);
     };
-  }, [cancelTopOperation, changeSelection, requestClose, selectedIds.length]);
+  }, [cancelTopOperation, changeSelection, handleRedo, handleUndo, requestClose, selectedIds.length]);
 
   const classifySelection = (terrainType) => commitDocument({
     ...editorDocument,
@@ -425,8 +459,8 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
           <p id={descriptionId} className="sr-only">SVG yüzeylerini kara, okyanus, göl veya yoksayılan alan olarak hazırlayan tam ekran çalışma alanı.</p>
           <div className="aop-editor-save-state" aria-live="polite"><span className={saveStatus.includes('başarısız') ? 'is-error' : ''}>{saveStatus}</span>{dirtyRoom && <small>Odaya uygulanmadı</small>}</div>
           <div className="aop-editor-header-actions">
-            <button type="button" onClick={() => setHistory((current) => undo(current))} disabled={!history.past.length || pending} aria-label="Geri al">↶ <span>Geri Al</span></button>
-            <button type="button" onClick={() => setHistory((current) => redo(current))} disabled={!history.future.length || pending} aria-label="Yinele">↷ <span>Yinele</span></button>
+            <button type="button" onClick={handleUndo} disabled={!history.past.length || pending} aria-label="Geri al">↶ <span>Geri Al</span></button>
+            <button type="button" onClick={handleRedo} disabled={!history.future.length || pending} aria-label="Yinele">↷ <span>Yinele</span></button>
             <button type="button" className="aop-local-save-button" onClick={() => flushDraft().catch(() => {})} disabled={pending || saveStatus === 'Kaydediliyor…'} aria-label="Taslağı hemen yerel olarak kaydet">Yerel Kaydet</button>
             <button type="button" onClick={() => setExportOpen(true)} disabled={pending || !analysisIsCurrent}>Dışa Aktar</button>
             <button type="button" onClick={resetAutomaticAnalysis} disabled={pending || !(record.originalSvg || record.baseSvg)}>Analizi Sıfırla</button>
