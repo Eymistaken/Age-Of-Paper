@@ -23,7 +23,10 @@ import { PHASES } from '../game/phases';
 import { applyClaim, applySaveIncome, releasePlayerClaims } from '../game/rules';
 import { advanceTurn, getActivePlayerId, removePlayerFromTurnState } from '../game/turns';
 import { validateMapDefinition } from '../game/mapValidation';
+import { prepareSvgMap, rebuildPreparedMap, sanitizeSvgMarkup } from '../game/mapImporter';
+import { deriveTerrainDocument } from '../game/terrainModel';
 import { applyNavalMapEdit } from '../game/navalRoutes';
+import { buildRoomMapAssets } from './mapAssetService';
 import {
   applyBuildPort,
   applyBuyShips,
@@ -148,6 +151,7 @@ export async function createRoom(userId, nickname) {
           hostId: userId,
           createdAt: serverTimestamp(),
           mapSvg: '',
+          mapManifest: null,
           mapDefinition: null,
           mapValidation: { valid: false, errors: [], warnings: [], regionCount: 0 },
           players: { [userId]: makePlayer(userId, nickname, COLORS[0]) },
@@ -399,17 +403,41 @@ export async function leaveRoom(roomCode, userId) {
 }
 
 export async function setRoomMap(roomCode, userId, importedMap) {
+  let preparedMap = importedMap?.baseSvg
+    ? importedMap
+    : await prepareSvgMap(importedMap?.preparedSvg || importedMap?.sanitizedSvg || '', {
+      displayName: importedMap?.displayName,
+    });
+  if (preparedMap.terrainDocument) {
+    preparedMap = await rebuildPreparedMap(preparedMap, deriveTerrainDocument(preparedMap.terrainDocument));
+  } else if (preparedMap.preparedSvg) {
+    preparedMap = await prepareSvgMap(preparedMap.preparedSvg, { displayName: preparedMap.displayName });
+  }
+  preparedMap.baseSvg = sanitizeSvgMarkup(preparedMap.baseSvg);
+  const validation = validateMapDefinition(preparedMap.mapDefinition);
+  if (!validation.valid) throw new GameActionError('Harita doğrulama hataları çözülmeden odaya uygulanamaz.', 'INVALID_MAP');
+  const assets = await buildRoomMapAssets({ ...preparedMap, validation });
   await runTransaction(db, async (transaction) => {
     const reference = roomRef(roomCode);
-    const snapshot = await transaction.get(reference);
+    const baseReference = doc(db, ROOM_COLLECTION, roomCode, 'mapAssets', `base_${assets.manifest.baseSvgHash}`);
+    const metadataReference = doc(db, ROOM_COLLECTION, roomCode, 'mapAssets', `metadata_${assets.manifest.metadataHash}`);
+    const [snapshot, baseSnapshot, metadataSnapshot] = await Promise.all([
+      transaction.get(reference),
+      transaction.get(baseReference),
+      transaction.get(metadataReference),
+    ]);
     if (!snapshot.exists()) throw new GameActionError('Oda bulunamadı.', 'ROOM_NOT_FOUND');
     const room = snapshot.data();
     if (room.hostId !== userId) throw new GameActionError('Haritayı yalnızca kurucu değiştirebilir.', 'HOST_ONLY');
     if (room.phase !== PHASES.LOBBY) throw new GameActionError('Oyun başladıktan sonra harita değiştirilemez.', 'ROOM_STARTED');
+    const createdAt = Timestamp.now();
+    if (!baseSnapshot.exists()) transaction.set(baseReference, { ...assets.baseAsset, createdAt, createdBy: userId });
+    if (!metadataSnapshot.exists()) transaction.set(metadataReference, { ...assets.metadataAsset, createdAt, createdBy: userId });
     transaction.update(reference, {
-      mapSvg: importedMap.sanitizedSvg,
-      mapDefinition: importedMap.mapDefinition,
-      mapValidation: importedMap.validation,
+      mapSvg: '',
+      mapManifest: assets.manifest,
+      mapDefinition: preparedMap.mapDefinition,
+      mapValidation: validation,
     });
   });
 }

@@ -159,6 +159,20 @@ Güncel host isteği tek başına kabul veya tamamen ret edebilir. Host cevap ve
 
 SVG yükleme alanı aynı sanitization, pricing ve validation hattını kullanan dosya seçici ile sürükle–bırak davranışını birlikte sunar. Tek `.svg` dosyası kabul edilir ve dosya boyutu 600 KB ile sınırlıdır.
 
+## Akıllı terrain hazırlık masası
+
+Kurucu bir SVG yüklediğinde dosya artık doğrudan odaya yazılmaz. Root SVG `viewBox` koordinatlarında çalışan hazırlık hattı açık metadata ve `data-terrain` ipuçlarını doğrular; kalan yüzeyleri semantik, geometri ve zayıf renk ipuçlarıyla `land`, `ocean`, `lake` veya `ignored` olarak sınıflandırır. Çizimde su yoksa negatif alan deterministik bileşenlere ayrılır; dış sınıra ulaşan bileşen okyanus, kapalı bileşen göl olur. Kıyı, final kara-su temasından türetilir ve kıyı kara bölgeleri varsayılan olarak limana izin verir.
+
+Tam ekran “Harita Hazırlık Masası” masaüstü ve mobilde Hand/Select/Brush araçlarını, kalıcı Ctrl seçimini, viewBox marquee seçimini, sınır/iç alan analizini, toplu override önizlemesini, port iznini ve `Ctrl+Z`/`Ctrl+Y` history’sini sunar. Editör değişiklikleri kısa debounce ile IndexedDB’ye kaydeder; odaya yalnız açık “Odaya Uygula” emriyle atomik olarak yazılır. “Son Haritalar” arşivi yükleme yapmadan düzenleme, kullanma, dışa aktarma, çoğaltma ve onaylı silme işlemlerini sağlar.
+
+Hazırlanan SVG, güvenli ve sürümlü `<metadata id="age-of-paper-map">` JSON kaydı içerir; dosya adı metadata tespitinde kullanılmaz. Aynı `mapId` ve geometri-hash uyuşmazlıkları sessizce uygulanmaz. Ayrıntılı sözleşme ve nötr örnekler için [`docs/metadata.md`](docs/metadata.md) dosyasına bakın.
+
+### Content-addressed oda harita asset’leri
+
+Yeni hazırlanan haritalarda canlı room belgesi büyük SVG’yi taşımaz. `mapManifest`, kompakt `mapDefinition` ve doğrulama özeti room belgesinde kalır; temel SVG `baseSvgHash`, kompakt metadata ise `metadataHash` ile `rooms/{roomCode}/mapAssets/` altında ayrı immutable belgeler olarak saklanır. Oyuncu önce IndexedDB cache’ini kontrol eder: iki hash de varsa indirme yapmaz, yalnız metadata değişmişse temel SVG’yi yeniden indirmez, temel hash değişmişse iki asset’i alır. Hash/revision/şema uyuşmazlığı güvenli tam indirmeye düşer. JSON patch zinciri kullanılmaz.
+
+Asset yazımı yalnız lobby host’una, okuma yalnız oda oyuncularına açıktır. Tam editor history, confidence kanıtları, thumbnail, original draft ve büyük tekrar üretilebilir su grid’i Firestore’a yazılmaz. Legacy inline `mapSvg` odaları açılmaya devam eder; sonraki host apply manifest düzenine geçirir.
+
 ## Güvenlik sınırları
 
 `firestore.rules`, schema 4 oda oluşturmayı, üyelik/presence/chat ayrımını, host-only lobi rota düzenlemeyi, evreyi, etkin ve elenmemiş aktörü, tur numarasını, gelir damgasını, lojistik maliyetlerini, asker adımlarını, doğrudan saldırı komşuluğunu, deniz rotası/liman/gemi kapasitesini, deterministik kayıpları ve bitmiş oyun donmasını doğrular. Mevcut join request, claim ve save-income korumaları korunur.

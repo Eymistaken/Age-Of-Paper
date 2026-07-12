@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const firestore = vi.hoisted(() => ({
   room: null,
   update: vi.fn(),
+  set: vi.fn(),
   runTransaction: vi.fn(),
 }));
 
@@ -10,13 +11,14 @@ vi.mock('../config/firebase', () => ({ db: { kind: 'test-db' } }));
 vi.mock('firebase/firestore', () => ({
   FieldPath: class FieldPath {},
   Timestamp: { now: () => ({ kind: 'timestamp' }) },
-  doc: (_db, collection, id) => ({ collection, id }),
+  doc: (_db, ...segments) => ({ segments }),
   runTransaction: firestore.runTransaction,
   serverTimestamp: () => ({ kind: 'server-timestamp' }),
   updateDoc: vi.fn(),
 }));
 
-import { configureNavalMap } from './roomService';
+import { prepareSvgMap } from '../game/mapImporter';
+import { configureNavalMap, setRoomMap } from './roomService';
 
 function lobbyRoom() {
   const regions = ['a', 'b'].map((id) => ({
@@ -44,11 +46,38 @@ function lobbyRoom() {
 beforeEach(() => {
   firestore.room = lobbyRoom();
   firestore.update.mockReset();
+  firestore.set.mockReset();
   firestore.runTransaction.mockReset();
   firestore.runTransaction.mockImplementation(async (_db, operation) => operation({
-    get: async () => ({ exists: () => true, data: () => firestore.room }),
+    get: async (reference) => reference.segments.length === 2
+      ? ({ exists: () => true, data: () => firestore.room })
+      : ({ exists: () => false, data: () => null }),
+    set: firestore.set,
     update: firestore.update,
   }));
+});
+
+describe('setRoomMap content-addressed transaction', () => {
+  it('writes two immutable assets and the compact room manifest atomically', async () => {
+    const prepared = await prepareSvgMap(`<svg viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">
+      <rect id="land_a" data-terrain="land" width="40" height="50"/>
+      <rect id="land_b" data-terrain="land" x="40" width="40" height="50"/>
+      <rect id="water_1" data-terrain="ocean" x="80" width="20" height="50"/>
+    </svg>`, { displayName: 'Atomic Map' });
+    await setRoomMap('ABCD', 'host', prepared);
+    expect(firestore.runTransaction).toHaveBeenCalledOnce();
+    expect(firestore.set).toHaveBeenCalledTimes(2);
+    expect(firestore.set.mock.calls.map(([reference]) => reference.segments.at(-1))).toEqual(expect.arrayContaining([
+      `base_${prepared.baseSvgHash}`,
+      `metadata_${prepared.metadataHash}`,
+    ]));
+    expect(firestore.update).toHaveBeenCalledOnce();
+    const [, update] = firestore.update.mock.calls[0];
+    expect(update.mapSvg).toBe('');
+    expect(update.mapManifest).toMatchObject({ mapId: prepared.mapId, baseSvgHash: prepared.baseSvgHash, metadataHash: prepared.metadataHash });
+    expect(update.mapDefinition.regionIds).toEqual(['land_a', 'land_b']);
+    expect(update.mapValidation.valid).toBe(true);
+  });
 });
 
 describe('configureNavalMap atomic route transaction', () => {

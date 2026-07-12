@@ -177,6 +177,18 @@ function recruitUpdate(room, overrides = {}) {
   };
 }
 
+function buildPortUpdate(room, overrides = {}) {
+  return {
+    players: { ...room.players, host: { ...room.players.host, money: room.players.host.money - 30_000 } },
+    claims: { ...room.claims, r1: { ...room.claims.r1, hasPort: true } },
+    lastAction: {
+      type: 'build_port', actorId: 'host', regionId: 'r1', count: 1, cost: 30_000,
+      turnNumber: room.turnNumber, actionId: `${room.turnNumber}:build_port:host:r1`, at: Timestamp.now(),
+    },
+    ...overrides,
+  };
+}
+
 function captureUpdate(room, overrides = {}) {
   return {
     phase: 'finished',
@@ -579,6 +591,58 @@ describe('lobby naval configuration security rules', () => {
   });
 });
 
+describe('content addressed map asset security rules', () => {
+  const manifest = {
+    version: 1,
+    mapId: 'map_neutral',
+    displayName: 'Neutral Map',
+    revision: 1,
+    baseSvgHash: 'abc123',
+    metadataHash: 'def456',
+    metadataSchemaVersion: 1,
+    analysisAlgorithmVersion: 'terrain-grid-v1',
+    mapDefinitionVersion: 1,
+  };
+
+  function lobby() {
+    return roomData(['host', 'a'], {
+      phase: 'lobby', turnOrder: [], turnIndex: 0, turnNumber: 0, roundNumber: 0, claims: {}, mapManifest: null,
+    });
+  }
+
+  const baseAsset = {
+    kind: 'base_svg', schemaVersion: 1, hash: 'abc123', svg: '<svg/>', size: 6,
+    createdAt: Timestamp.now(), createdBy: 'host',
+  };
+
+  it('allows only the lobby host to write immutable hash assets and the manifest', async () => {
+    const room = lobby();
+    await seed('ASSET_HOST', room);
+    await assertSucceeds(setDoc(doc(context('host'), 'rooms', 'ASSET_HOST', 'mapAssets', 'base_abc123'), baseAsset));
+    await assertSucceeds(updateDoc(doc(context('host'), 'rooms', 'ASSET_HOST'), {
+      mapSvg: '', mapManifest: manifest, mapDefinition: room.mapDefinition, mapValidation: room.mapValidation,
+    }));
+
+    await seed('ASSET_MEMBER', room);
+    await assertFails(setDoc(doc(context('a'), 'rooms', 'ASSET_MEMBER', 'mapAssets', 'base_abc123'), { ...baseAsset, createdBy: 'a' }));
+    await assertFails(updateDoc(doc(context('a'), 'rooms', 'ASSET_MEMBER'), { mapSvg: '', mapManifest: manifest }));
+
+    const started = { ...room, phase: 'claiming', turnOrder: ['host', 'a'], turnNumber: 1, roundNumber: 1 };
+    await seed('ASSET_STARTED', started);
+    await assertFails(setDoc(doc(context('host'), 'rooms', 'ASSET_STARTED', 'mapAssets', 'base_abc123'), baseAsset));
+  });
+
+  it('allows room members to read assets and rejects outsiders', async () => {
+    const room = lobby();
+    await seed('ASSET_READ', room);
+    await environment.withSecurityRulesDisabled(async (admin) => {
+      await setDoc(doc(admin.firestore(), 'rooms', 'ASSET_READ', 'mapAssets', 'base_abc123'), baseAsset);
+    });
+    await assertSucceeds(getDoc(doc(context('a'), 'rooms', 'ASSET_READ', 'mapAssets', 'base_abc123')));
+    await assertFails(getDoc(doc(context('outsider'), 'rooms', 'ASSET_READ', 'mapAssets', 'base_abc123')));
+  });
+});
+
 describe('mobilization and war security rules', () => {
   it('allows exact recruiting without advancing and rejects wrong cost or enemy recruiting', async () => {
     const room = warRoom();
@@ -606,6 +670,29 @@ describe('mobilization and war security rules', () => {
     const fake = captureUpdate(room);
     fake.claims.r2.soldiers = 2000;
     await assertFails(updateDoc(doc(context('host'), 'rooms', 'FAKE_COMBAT'), fake));
+  });
+
+  it('enforces explicit port permission and preserves legacy coastal fallback', async () => {
+    const base = warRoom();
+    const legacy = {
+      ...base,
+      claims: { ...base.claims, r1: { ...base.claims.r1, hasPort: false, ships: 0 } },
+    };
+    await seed('LEGACY_PORT', legacy);
+    await assertSucceeds(updateDoc(doc(context('host'), 'rooms', 'LEGACY_PORT'), buildPortUpdate(legacy)));
+
+    const denied = {
+      ...legacy,
+      mapDefinition: {
+        ...legacy.mapDefinition,
+        regionsById: {
+          ...legacy.mapDefinition.regionsById,
+          r1: { ...legacy.mapDefinition.regionsById.r1, portAllowed: false },
+        },
+      },
+    };
+    await seed('DENIED_PORT', denied);
+    await assertFails(updateDoc(doc(context('host'), 'rooms', 'DENIED_PORT'), buildPortUpdate(denied)));
   });
 
   it('rejects non-active attacks and naval attacks without ship capacity', async () => {

@@ -12,6 +12,10 @@ export function isWarTurnPhase(phase) {
   return phase === PHASES.MOBILIZATION || phase === PHASES.WAR;
 }
 
+export function canBuildPort(region) {
+  return region?.coastal === true && (region.portAllowed === undefined || region.portAllowed === true);
+}
+
 export function grantTurnIncome(room, playerId = room?.turnOrder?.[room?.turnIndex]) {
   const player = room?.players?.[playerId];
   if (!isWarTurnPhase(room?.phase) || !player || player.eliminated || playerId !== room.turnOrder?.[room.turnIndex]) {
@@ -59,8 +63,18 @@ function purchase(room, playerId, regionId, kind, count) {
   if (!Number.isSafeInteger(cost) || safeMoney(base.player.money) < cost) {
     return { room, eligibility: { legal: false, code: 'INSUFFICIENT_FUNDS', reason: 'Hazinede yeterli altın yok.' } };
   }
-  if (kind === 'port' && (!base.region.coastal || base.claim.hasPort)) {
-    return { room, eligibility: { legal: false, code: base.claim.hasPort ? 'HAS_PORT' : 'NOT_COASTAL', reason: base.claim.hasPort ? 'Bu bölgede zaten liman var.' : 'Liman yalnızca kıyı bölgesine kurulabilir.' } };
+  if (kind === 'port' && (!canBuildPort(base.region) || base.claim.hasPort)) {
+    const code = base.claim.hasPort
+      ? 'HAS_PORT'
+      : base.region.coastal
+        ? 'PORT_NOT_ALLOWED'
+        : 'NOT_COASTAL';
+    const reason = base.claim.hasPort
+      ? 'Bu bölgede zaten liman var.'
+      : base.region.coastal
+        ? 'Bu kıyı bölgesinde liman kurulmasına harita hazırlığında izin verilmemiş.'
+        : 'Liman yalnızca kıyı bölgesine kurulabilir.';
+    return { room, eligibility: { legal: false, code, reason } };
   }
   if (kind === 'ships' && (!base.region.coastal || !base.claim.hasPort)) {
     return { room, eligibility: { legal: false, code: 'PORT_REQUIRED', reason: 'Gemi satın almak için kıyı bölgesinde liman gerekir.' } };

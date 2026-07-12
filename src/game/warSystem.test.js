@@ -69,6 +69,23 @@ describe('war income and logistics', () => {
     expect(applyBuyShips(funded, 'p1', 'b', 1).eligibility.code).toBe('PORT_REQUIRED');
     expect(applyBuyShips(funded, 'p1', 'a', 2).room.claims.a.ships).toBe(7);
   });
+
+  it('uses explicit port permission and falls back to coastal for legacy maps', () => {
+    const base = room();
+    const players = { ...base.players, p1: { ...base.players.p1, money: 100000, lastIncomeTurn: 9 } };
+    const claims = { ...base.claims, a: { ...base.claims.a, hasPort: false } };
+    const deniedRegion = { ...base.mapDefinition.regionsById.a, portAllowed: false };
+    const denied = room({
+      players,
+      claims,
+      mapDefinition: {
+        ...base.mapDefinition,
+        regionsById: { ...base.mapDefinition.regionsById, a: deniedRegion },
+      },
+    });
+    expect(applyBuildPort(denied, 'p1', 'a').eligibility.code).toBe('PORT_NOT_ALLOWED');
+    expect(applyBuildPort(room({ players, claims }), 'p1', 'a').eligibility.legal).toBe(true);
+  });
 });
 
 describe('movement', () => {

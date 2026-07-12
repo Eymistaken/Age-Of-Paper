@@ -278,3 +278,212 @@ export function importSvgMap(svgText) {
   const sanitizedSvg = new XMLSerializer().serializeToString(svg);
   return { sanitizedSvg, mapDefinition, validation };
 }
+
+export class MapMetadataConflictError extends Error {
+  constructor(message, code, details = {}) {
+    super(message);
+    this.name = 'MapMetadataConflictError';
+    this.code = code;
+    this.details = details;
+  }
+}
+
+function newMapId() {
+  const random = globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  return `map_${normalizeRegionId(random, 'local')}`;
+}
+
+/**
+ * Builds the full local editor record. This API is async because hashing and
+ * negative-space analysis intentionally yield between expensive phases.
+ */
+export async function prepareSvgMap(svgText, options = {}) {
+  const {
+    applyCompactMetadataToSvg,
+    canonicalJson,
+    createMetadataPackage,
+    embedMapMetadata,
+    extractMapMetadata,
+    hashText,
+    stripEditorMetadata,
+  } = await import('./mapMetadata');
+  const { analyzeSvgTerrain } = await import('./terrainAnalysis');
+  const { buildCompatibilityMapDefinition, deriveTerrainDocument } = await import('./terrainModel');
+
+  const originalSvg = String(svgText || '');
+  const sanitizedOriginal = sanitizeSvgMarkup(originalSvg);
+  const extracted = extractMapMetadata(sanitizedOriginal);
+  const baseSvg = stripEditorMetadata(sanitizedOriginal);
+  const baseSvgHash = await hashText(baseSvg);
+  let terrainDocument;
+  let metadataStatus = extracted.found ? 'invalid' : 'absent';
+
+  if (extracted.found && extracted.valid) {
+    if (extracted.metadata.sourceGeometryHash !== baseSvgHash) {
+      if (options.metadataMismatch === 'reanalyze') {
+        metadataStatus = 'geometry_mismatch_reanalyzed';
+      } else {
+        throw new MapMetadataConflictError(
+          'Age of Paper metadata kaydı SVG geometrisiyle eşleşmiyor.',
+          'SOURCE_GEOMETRY_MISMATCH',
+          { expected: extracted.metadata.sourceGeometryHash, actual: baseSvgHash, metadata: extracted.metadata },
+        );
+      }
+    } else {
+      if (extracted.metadata.compact) {
+        const regenerated = await analyzeSvgTerrain({
+          svgText: baseSvg,
+          signal: options.signal,
+          onProgress: options.onProgress,
+        });
+        const importedById = Object.fromEntries(extracted.metadata.surfaces.map((surface) => [surface.id, surface]));
+        terrainDocument = deriveTerrainDocument({
+          ...regenerated,
+          mapId: extracted.metadata.mapId,
+          displayName: extracted.metadata.displayName,
+          revision: extracted.metadata.revision,
+          sourceGeometryHash: baseSvgHash,
+          baseSvgHash,
+          analysisAlgorithmVersion: extracted.metadata.analysisAlgorithmVersion,
+          compatibilityRoutes: extracted.metadata.compatibilityRoutes,
+          importIssues: extracted.metadata.importIssues,
+          surfaces: regenerated.surfaces.map((surface) => importedById[surface.id]
+            ? {
+              ...surface,
+              metadataTerrainType: importedById[surface.id].metadataTerrainType,
+              hostOverride: importedById[surface.id].hostOverride,
+              portPreference: importedById[surface.id].portPreference,
+            }
+            : surface),
+        });
+      } else {
+        terrainDocument = deriveTerrainDocument({
+          mapId: extracted.metadata.mapId,
+          displayName: extracted.metadata.displayName,
+          revision: extracted.metadata.revision,
+          sourceGeometryHash: baseSvgHash,
+          baseSvgHash,
+          viewBox: extracted.metadata.viewBox,
+          analysisAlgorithmVersion: extracted.metadata.analysisAlgorithmVersion,
+          compatibilityRoutes: extracted.metadata.compatibilityRoutes,
+          importIssues: extracted.metadata.importIssues,
+          surfaces: extracted.metadata.surfaces.map((surface) => ({
+            ...surface,
+            automatic: surface.automatic || {
+              terrainType: surface.terrainType,
+              confidence: surface.confidence,
+              evidence: ['compact_metadata'],
+            },
+          })),
+        });
+      }
+      metadataStatus = 'validated';
+    }
+  }
+
+  if (!terrainDocument) {
+    terrainDocument = await analyzeSvgTerrain({
+      svgText: sanitizedOriginal,
+      signal: options.signal,
+      onProgress: options.onProgress,
+    });
+    terrainDocument = deriveTerrainDocument({
+      ...terrainDocument,
+      mapId: options.mapId || newMapId(),
+      displayName: String(options.displayName || 'İsimsiz Harita').trim().slice(0, 120) || 'İsimsiz Harita',
+      revision: 1,
+      sourceGeometryHash: baseSvgHash,
+      baseSvgHash,
+    });
+  }
+
+  let mapDefinition = buildCompatibilityMapDefinition(terrainDocument);
+  const pricedById = mapDefinition.regionsById;
+  terrainDocument = deriveTerrainDocument({
+    ...terrainDocument,
+    baseSvgHash,
+    sourceGeometryHash: baseSvgHash,
+    surfaces: terrainDocument.surfaces.map((surface) => pricedById[surface.id]
+      ? { ...surface, price: pricedById[surface.id].price, income: pricedById[surface.id].income }
+      : surface),
+  });
+  mapDefinition = buildCompatibilityMapDefinition(terrainDocument);
+  const validation = validateMapDefinition(mapDefinition);
+  const fullMetadata = createMetadataPackage(terrainDocument);
+  const compactMetadata = createMetadataPackage(terrainDocument, { compact: true });
+  const metadataHash = await hashText(canonicalJson(compactMetadata));
+  const composedSvg = applyCompactMetadataToSvg(baseSvg, compactMetadata);
+  const preparedSvg = embedMapMetadata(composedSvg, fullMetadata);
+  return {
+    mapId: terrainDocument.mapId,
+    displayName: terrainDocument.displayName,
+    revision: terrainDocument.revision,
+    originalSvg,
+    baseSvg,
+    preparedSvg,
+    thumbnail: composedSvg,
+    sanitizedSvg: composedSvg,
+    mapDefinition,
+    validation,
+    terrainDocument,
+    fullMetadata,
+    compactMetadata,
+    baseSvgHash,
+    metadataHash,
+    metadataStatus,
+    createdAt: options.createdAt || Date.now(),
+    updatedAt: Date.now(),
+    sourceLabel: options.sourceLabel || 'Dosya içe aktarımı',
+  };
+}
+
+export async function rebuildPreparedMap(preparedMap, nextTerrainDocument, options = {}) {
+  const {
+    applyCompactMetadataToSvg,
+    canonicalJson,
+    createMetadataPackage,
+    embedMapMetadata,
+    hashText,
+  } = await import('./mapMetadata');
+  const { buildCompatibilityMapDefinition, deriveTerrainDocument } = await import('./terrainModel');
+  let terrainDocument = deriveTerrainDocument({
+    ...nextTerrainDocument,
+    mapId: preparedMap.mapId,
+    displayName: options.displayName ?? nextTerrainDocument.displayName ?? preparedMap.displayName,
+    revision: options.bumpRevision ? Math.max(preparedMap.revision || 1, nextTerrainDocument.revision || 1) + 1 : (nextTerrainDocument.revision || preparedMap.revision || 1),
+    baseSvgHash: preparedMap.baseSvgHash,
+    sourceGeometryHash: preparedMap.baseSvgHash,
+  });
+  let mapDefinition = buildCompatibilityMapDefinition(terrainDocument);
+  terrainDocument = deriveTerrainDocument({
+    ...terrainDocument,
+    surfaces: terrainDocument.surfaces.map((surface) => mapDefinition.regionsById[surface.id]
+      ? {
+        ...surface,
+        price: mapDefinition.regionsById[surface.id].price,
+        income: mapDefinition.regionsById[surface.id].income,
+      }
+      : surface),
+  });
+  mapDefinition = buildCompatibilityMapDefinition(terrainDocument);
+  const validation = validateMapDefinition(mapDefinition);
+  const fullMetadata = createMetadataPackage(terrainDocument);
+  const compactMetadata = createMetadataPackage(terrainDocument, { compact: true });
+  const metadataHash = await hashText(canonicalJson(compactMetadata));
+  const sanitizedSvg = applyCompactMetadataToSvg(preparedMap.baseSvg, compactMetadata);
+  return {
+    ...preparedMap,
+    displayName: terrainDocument.displayName,
+    revision: terrainDocument.revision,
+    updatedAt: Date.now(),
+    terrainDocument,
+    mapDefinition,
+    validation,
+    fullMetadata,
+    compactMetadata,
+    metadataHash,
+    sanitizedSvg,
+    preparedSvg: embedMapMetadata(sanitizedSvg, fullMetadata),
+    thumbnail: sanitizedSvg,
+  };
+}

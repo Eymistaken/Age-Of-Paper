@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { importSvgMap } from './mapImporter';
+import { importSvgMap, prepareSvgMap } from './mapImporter';
+import { stripEditorMetadata } from './mapMetadata';
 
 describe('SVG map importer', () => {
   it('prefers explicit regions, removes decoration and sanitizes unsafe content', () => {
@@ -96,5 +97,55 @@ describe('SVG map importer', () => {
     expect(result.validation.valid).toBe(true);
     expect(result.mapDefinition.regionsById.a).toMatchObject({ coastal: true, seaNeighbors: ['b'] });
     expect(result.mapDefinition.regionsById.b).toMatchObject({ coastal: true, seaNeighbors: ['a'] });
+  });
+
+  it('prepares and reimports an Age of Paper SVG without repeating terrain guesses', async () => {
+    const svg = `<svg viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">
+      <rect id="land.a" data-terrain="land" width="50" height="50"/>
+      <rect id="water_1" data-terrain="ocean" x="50" width="50" height="50"/>
+    </svg>`;
+    const prepared = await prepareSvgMap(svg, { displayName: 'Round Trip' });
+    expect(stripEditorMetadata(prepared.preparedSvg)).toBe(prepared.baseSvg);
+    const reimported = await prepareSvgMap(prepared.preparedSvg);
+    expect(reimported.metadataStatus).toBe('validated');
+    expect(reimported.mapId).toBe(prepared.mapId);
+    expect(reimported.mapDefinition).toEqual(prepared.mapDefinition);
+    expect(reimported.terrainDocument.surfaces.map((surface) => ({
+      id: surface.id, terrainType: surface.terrainType, coastType: surface.coastType, portAllowed: surface.portAllowed,
+    }))).toEqual(prepared.terrainDocument.surfaces.map((surface) => ({
+      id: surface.id, terrainType: surface.terrainType, coastType: surface.coastType, portAllowed: surface.portAllowed,
+    })));
+  });
+
+  it('keeps automatic economy non-zero when prepared SVG regions omit price metadata', async () => {
+    const prepared = await prepareSvgMap(`<svg viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">
+      <rect id="land_a" data-terrain="land" width="50" height="50"/>
+      <rect id="water_1" data-terrain="ocean" x="50" width="50" height="50"/>
+    </svg>`);
+    expect(prepared.mapDefinition.regionsById.land_a.price).toBeGreaterThan(0);
+    expect(prepared.mapDefinition.regionsById.land_a.income).toBeGreaterThan(0);
+  });
+
+  it('preserves explicit land and compatibility sea metadata through terrain preparation', async () => {
+    const prepared = await prepareSvgMap(`<svg viewBox="0 0 300 100" xmlns="http://www.w3.org/2000/svg">
+      <rect id="land_a" data-terrain="land" data-neighbors="land_b" data-sea-neighbors="land_b" width="50" height="100"/>
+      <rect id="water_1" data-terrain="ocean" x="50" width="200" height="100"/>
+      <rect id="land_b" data-terrain="land" data-neighbors="land_a" data-sea-neighbors="land_a" x="250" width="50" height="100"/>
+    </svg>`);
+    expect(prepared.mapDefinition.regionsById.land_a.claimNeighbors).toEqual(['land_b']);
+    expect(prepared.mapDefinition.regionsById.land_b.landNeighbors).toEqual(['land_a']);
+    expect(prepared.mapDefinition.regionsById.land_a.seaNeighbors).toEqual(['land_b']);
+    expect(prepared.validation.valid).toBe(true);
+    const reimported = await prepareSvgMap(prepared.preparedSvg);
+    expect(reimported.mapDefinition).toEqual(prepared.mapDefinition);
+  });
+
+  it('does not silently accept invalid terrain editor hints', async () => {
+    const prepared = await prepareSvgMap(`<svg viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">
+      <rect id="land_a" data-terrain="land" data-price="not-a-number" data-port-allowed="maybe" width="50" height="50"/>
+      <rect id="water_1" data-terrain="ocean" x="50" width="50" height="50"/>
+    </svg>`);
+    expect(prepared.validation.valid).toBe(false);
+    expect(prepared.validation.errors.map((item) => item.code)).toEqual(expect.arrayContaining(['INVALID_NUMBER', 'INVALID_PORT_ALLOWED']));
   });
 });

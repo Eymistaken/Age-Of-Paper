@@ -66,6 +66,15 @@ export function validateMapDefinition(mapDefinition) {
     if (typeof region?.coastal !== 'boolean') {
       errors.push(issue('INVALID_COASTAL', `“${region?.id || '(boş)'}” için coastal true veya false olmalı.`, region?.id));
     }
+    if (region?.portAllowed !== undefined && typeof region.portAllowed !== 'boolean') {
+      errors.push(issue('INVALID_PORT_ALLOWED', `“${region?.id || '(boş)'}” için portAllowed true veya false olmalı.`, region?.id));
+    }
+    if (region?.portAllowed === true && region?.coastal !== true) {
+      errors.push(issue('INLAND_PORT_ALLOWED', `“${region?.id || '(boş)'}” kıyı değilken limana izin veremez.`, region?.id));
+    }
+    if (region?.terrainType !== undefined && region.terrainType !== 'land') {
+      errors.push(issue('NON_LAND_PLAYABLE', `“${region?.id || '(boş)'}” oynanabilir tanımda yalnızca kara olabilir.`, region?.id));
+    }
 
     for (const field of ['price', 'income']) {
       if (!Number.isFinite(region?.[field]) || region[field] < 0) {

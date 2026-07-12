@@ -49,4 +49,14 @@ describe('map definition validation', () => {
     disconnected.forEach((region) => { region.claimNeighbors = []; region.landNeighbors = []; });
     expect(validateMapDefinition(definition(disconnected)).errors.map((item) => item.code)).toContain('UNREACHABLE_REGION');
   });
+
+  it('rejects non-land playable regions and inland port permissions while accepting legacy maps', () => {
+    expect(validateMapDefinition(definition()).valid).toBe(true);
+    const inlandPort = structuredClone(validRegions);
+    inlandPort[0].portAllowed = true;
+    expect(validateMapDefinition(definition(inlandPort)).errors.map((item) => item.code)).toContain('INLAND_PORT_ALLOWED');
+    const water = structuredClone(validRegions);
+    water[0].terrainType = 'lake';
+    expect(validateMapDefinition(definition(water)).errors.map((item) => item.code)).toContain('NON_LAND_PLAYABLE');
+  });
 });

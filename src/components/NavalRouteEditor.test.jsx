@@ -90,7 +90,7 @@ describe('naval route dialog', () => {
       <WaitingRoom
         roomCode="ABCD"
         players={[player]}
-        roomData={room()}
+        roomData={room(4, true)}
         isHost
         handleMapUpload={() => {}}
         handleMapFile={() => {}}
@@ -104,7 +104,8 @@ describe('naval route dialog', () => {
     );
     expect(container.querySelector('.aop-naval-editor')).toBeNull();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
-    const opener = button('Deniz Bağlantılarını Ayarla');
+    expect(button('Oda Haritasını Hazırlık Masasında Aç')).not.toBeUndefined();
+    const opener = button('Legacy Deniz Rotalarını Gör');
     await click(opener);
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog).not.toBeNull();

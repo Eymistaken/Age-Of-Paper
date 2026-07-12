@@ -4,6 +4,7 @@ import { listNavalRoutes } from '../game/navalRoutes';
 import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
 import { NavalRouteEditor } from './NavalRouteEditor';
+import { RecentMaps } from './RecentMaps';
 
 function ValidationSummary({ validation }) {
   if (!validation?.regionCount) {
@@ -71,6 +72,14 @@ export const WaitingRoom = ({
   resetApp,
   loading,
   error,
+  mapRepository,
+  onEditPreparedMap,
+  onUsePreparedMap,
+  onEditRoomMap,
+  recentMapsRevision,
+  analysisProgress,
+  cancelMapAnalysis,
+  roomAssetState,
 }) => {
   const [dragActive, setDragActive] = useState(false);
   const [navalOpen, setNavalOpen] = useState(false);
@@ -78,6 +87,7 @@ export const WaitingRoom = ({
   const fileInput = useRef(null);
   const navalButton = useRef(null);
   const hasValidMap = Boolean(roomData.mapValidation?.valid && roomData.mapSvg && roomData.mapDefinition);
+  const hasLegacyRoutes = listNavalRoutes(roomData.mapDefinition).length > 0;
   const preventFileNavigation = (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -195,24 +205,27 @@ export const WaitingRoom = ({
                 aria-busy={loading}
               >
                 <Icon p={Icons.Map}/>
-                <span>{loading ? 'Harita işleniyor…' : 'SVG’yi buraya bırak veya dosya seç'}</span>
-                {roomData.mapSvg && !loading && <small>Yüklü haritayı değiştirir</small>}
+                <span>{loading ? (analysisProgress?.message || 'Harita işleniyor…') : 'SVG’yi analiz et ve hazırlık editöründe aç'}</span>
+                {roomData.mapDefinition && !loading && <small>Odaya ancak “Odaya Uygula” emriyle yazılır</small>}
                 <input ref={fileInput} type="file" accept=".svg,image/svg+xml" onChange={handleMapUpload} className="sr-only" disabled={loading}/>
               </label>
+              {analysisProgress && <button type="button" className="w-full aop-button-secondary min-h-11 px-3" onClick={cancelMapAnalysis}>Analizi İptal Et · %{Math.round((analysisProgress.progress || 0) * 100)}</button>}
               {hasValidMap && (
                 <>
                   <NavalInfrastructureSummary roomData={roomData} />
                   <button
-                    ref={navalButton}
                     type="button"
                     className="w-full aop-button-secondary min-h-12 px-3"
                     disabled={loading}
-                    onClick={() => setNavalOpen(true)}
+                    onClick={onEditRoomMap}
                   >
-                    Deniz Bağlantılarını Ayarla
+                    Oda Haritasını Hazırlık Masasında Aç
                   </button>
+                  {hasLegacyRoutes && <button ref={navalButton} type="button" className="w-full aop-button-secondary min-h-12 px-3" disabled={loading} onClick={() => setNavalOpen(true)}>Legacy Deniz Rotalarını Gör</button>}
                 </>
               )}
+              {roomAssetState?.status === 'loading' && <p className="aop-validation-note">Harita hash cache’i kontrol ediliyor…</p>}
+              {roomAssetState?.status === 'error' && <p className="aop-validation-note is-error">{roomAssetState.error}</p>}
               <button
                 onClick={startGame}
                 disabled={loading || !roomData.mapValidation?.valid}
@@ -242,6 +255,7 @@ export const WaitingRoom = ({
           )}
         </aside>
       </div>
+      {isHost && mapRepository && <RecentMaps repository={mapRepository} onEdit={onEditPreparedMap} onUse={onUsePreparedMap} refreshToken={recentMapsRevision} />}
     </main>
     </div>
     {navalOpen && hasValidMap && (
@@ -251,7 +265,7 @@ export const WaitingRoom = ({
         onEdit={editNavalMap}
         onClose={() => setNavalOpen(false)}
         returnFocusRef={navalButton}
-        isHost={isHost}
+        isHost={false}
         loading={loading}
       />
     )}

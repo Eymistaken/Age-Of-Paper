@@ -299,7 +299,7 @@ service cloud.firestore {
           ? request.resource.data.lastAction is map && isGameActionOperation()
           : changes.hasOnly(['players'])
             ? (!(request.auth.uid in resource.data.players) ? isLobbyJoin() : isPresenceUpdate())
-            : changes.hasOnly(['mapSvg', 'mapDefinition', 'mapValidation'])
+            : changes.hasOnly(['mapSvg', 'mapManifest', 'mapDefinition', 'mapValidation'])
               ? isHostMapUpdate()
               : changes.hasOnly(['chat']) && isChatUpdate();
     }
@@ -332,14 +332,38 @@ service cloud.firestore {
     function isHostMapUpdate() {
       return resource.data.phase == 'lobby'
         && resource.data.hostId == request.auth.uid
-        && roomChangesOnly(['mapSvg', 'mapDefinition', 'mapValidation'])
+        && roomChangesOnly(['mapSvg', 'mapManifest', 'mapDefinition', 'mapValidation'])
         && request.resource.data.mapSvg is string
-        && request.resource.data.mapSvg.size() > 0
+        && ((request.resource.data.mapManifest is map
+            && request.resource.data.mapSvg == ''
+            && validMapManifest(request.resource.data.mapManifest))
+          || (request.resource.data.get('mapManifest', null) == null
+            && request.resource.data.mapSvg.size() > 0))
         && request.resource.data.mapDefinition is map
         && request.resource.data.mapDefinition.version == 1
         && request.resource.data.mapDefinition.regionIds is list
         && request.resource.data.mapDefinition.regionsById is map
         && request.resource.data.mapValidation is map;
+    }
+
+    function validMapManifest(manifest) {
+      return manifest.keys().hasAll([
+          'version', 'mapId', 'displayName', 'revision', 'baseSvgHash', 'metadataHash',
+          'metadataSchemaVersion', 'analysisAlgorithmVersion', 'mapDefinitionVersion'
+        ])
+        && manifest.keys().hasOnly([
+          'version', 'mapId', 'displayName', 'revision', 'baseSvgHash', 'metadataHash',
+          'metadataSchemaVersion', 'analysisAlgorithmVersion', 'mapDefinitionVersion'
+        ])
+        && manifest.version == 1
+        && manifest.mapId is string && manifest.mapId.size() > 0 && manifest.mapId.size() <= 120
+        && manifest.displayName is string && manifest.displayName.size() > 0 && manifest.displayName.size() <= 120
+        && manifest.revision is int && manifest.revision > 0
+        && manifest.baseSvgHash is string && manifest.baseSvgHash.size() >= 6 && manifest.baseSvgHash.size() <= 128
+        && manifest.metadataHash is string && manifest.metadataHash.size() >= 6 && manifest.metadataHash.size() <= 128
+        && manifest.metadataSchemaVersion == 1
+        && manifest.analysisAlgorithmVersion is string
+        && manifest.mapDefinitionVersion == 1;
     }
 
     function isHostStart() {
@@ -540,6 +564,7 @@ service cloud.firestore {
             && newClaim.soldiers == oldClaim.soldiers + 1000 * count
           : type == 'build_port'
             ? region.coastal == true
+              && region.get('portAllowed', region.coastal) == true
               && oldClaim.hasPort == false
               && newClaim.diff(oldClaim).affectedKeys().hasOnly(['hasPort'])
               && newClaim.hasPort == true
@@ -780,13 +805,13 @@ service cloud.firestore {
 
       allow create: if signedIn()
         && request.resource.data.keys().hasAll([
-          'schemaVersion', 'phase', 'hostId', 'createdAt', 'mapSvg', 'mapDefinition', 'mapValidation',
+          'schemaVersion', 'phase', 'hostId', 'createdAt', 'mapSvg', 'mapManifest', 'mapDefinition', 'mapValidation',
           'players', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber', 'claims', 'chat', 'lastAction',
           'joinRequests', 'joinRequestAction', 'mobilizationTurnsRemaining', 'mobilizationPending',
           'winnerId', 'completedAt'
         ])
         && request.resource.data.keys().hasOnly([
-          'schemaVersion', 'phase', 'hostId', 'createdAt', 'mapSvg', 'mapDefinition', 'mapValidation',
+          'schemaVersion', 'phase', 'hostId', 'createdAt', 'mapSvg', 'mapManifest', 'mapDefinition', 'mapValidation',
           'players', 'turnOrder', 'turnIndex', 'turnNumber', 'roundNumber', 'claims', 'chat', 'lastAction',
           'joinRequests', 'joinRequestAction', 'mobilizationTurnsRemaining', 'mobilizationPending',
           'winnerId', 'completedAt'
@@ -796,6 +821,7 @@ service cloud.firestore {
         && request.resource.data.hostId == request.auth.uid
         && request.resource.data.createdAt == request.time
         && request.resource.data.mapSvg == ''
+        && request.resource.data.mapManifest == null
         && request.resource.data.mapDefinition == null
         && request.resource.data.players.size() == 1
         && validPlayer(request.resource.data.players[request.auth.uid], request.auth.uid)
@@ -821,6 +847,60 @@ service cloud.firestore {
       allow delete: if signedIn()
         && request.auth.uid in resource.data.players
         && resource.data.players.size() == 1;
+    }
+
+    match /rooms/{roomCode}/mapAssets/{assetId} {
+      function parentRoom() {
+        return get(/databases/$(database)/documents/rooms/$(roomCode)).data;
+      }
+
+      function validBaseAsset() {
+        return request.resource.data.keys().hasAll([
+            'kind', 'schemaVersion', 'hash', 'svg', 'size', 'createdAt', 'createdBy'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'kind', 'schemaVersion', 'hash', 'svg', 'size', 'createdAt', 'createdBy'
+          ])
+          && request.resource.data.kind == 'base_svg'
+          && request.resource.data.schemaVersion == 1
+          && assetId == 'base_' + request.resource.data.hash
+          && request.resource.data.svg is string
+          && request.resource.data.svg.size() > 0
+          && request.resource.data.svg.size() <= 650000
+          && request.resource.data.size == request.resource.data.svg.size();
+      }
+
+      function validMetadataAsset() {
+        return request.resource.data.keys().hasAll([
+            'kind', 'schemaVersion', 'hash', 'mapId', 'revision', 'metadata', 'size', 'createdAt', 'createdBy'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'kind', 'schemaVersion', 'hash', 'mapId', 'revision', 'metadata', 'size', 'createdAt', 'createdBy'
+          ])
+          && request.resource.data.kind == 'metadata'
+          && request.resource.data.schemaVersion == 1
+          && assetId == 'metadata_' + request.resource.data.hash
+          && request.resource.data.mapId is string
+          && request.resource.data.revision is int && request.resource.data.revision > 0
+          && request.resource.data.metadata is map
+          && request.resource.data.size is int
+          && request.resource.data.size > 0 && request.resource.data.size <= 450000;
+      }
+
+      allow read: if signedIn() && request.auth.uid in parentRoom().players;
+
+      allow create: if signedIn()
+        && parentRoom().phase == 'lobby'
+        && parentRoom().hostId == request.auth.uid
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt is timestamp
+        && (validBaseAsset() || validMetadataAsset());
+
+      allow update: if false;
+
+      allow delete: if signedIn()
+        && parentRoom().phase == 'lobby'
+        && parentRoom().hostId == request.auth.uid;
     }
   }
 }
