@@ -14,7 +14,7 @@ function map() {
     name: id.toUpperCase(),
     price: 5000,
     income: 500,
-    coastal: false,
+    coastal: true,
     seaNeighbors: [],
     landNeighbors: ['a', 'b', 'c'].filter((other) => other !== id),
     claimNeighbors: ['a', 'b', 'c'].filter((other) => other !== id),
@@ -23,10 +23,10 @@ function map() {
 }
 
 describe('naval route editing and validation', () => {
-  it('creates and removes a symmetric route while visibly marking endpoints coastal', () => {
+  it('creates and removes a symmetric route without changing terrain-derived coasts', () => {
     const added = setNavalRoute(map(), 'a', 'b', true);
     expect(added.ok).toBe(true);
-    expect(added.autoMarkedCoastal).toBe(true);
+    expect(added.autoMarkedCoastal).toBe(false);
     expect(added.mapDefinition.regionsById.a).toMatchObject({ coastal: true, seaNeighbors: ['b'] });
     expect(added.mapDefinition.regionsById.b).toMatchObject({ coastal: true, seaNeighbors: ['a'] });
     const removed = setNavalRoute(added.mapDefinition, 'a', 'b', false);
@@ -34,11 +34,18 @@ describe('naval route editing and validation', () => {
     expect(removed.mapDefinition.regionsById.b.seaNeighbors).toEqual([]);
   });
 
-  it('atomically marks both endpoints coastal and creates the symmetric route', () => {
+  it('creates the symmetric route only for existing coasts', () => {
     const result = applyNavalMapEdit(map(), { type: 'create_route', firstId: 'a', secondId: 'b' });
-    expect(result).toMatchObject({ ok: true, autoMarkedCoastal: true, autoMarkedRegionIds: ['a', 'b'] });
+    expect(result).toMatchObject({ ok: true, autoMarkedCoastal: false, autoMarkedRegionIds: [] });
     expect(result.mapDefinition.regionsById.a).toMatchObject({ coastal: true, seaNeighbors: ['b'] });
     expect(result.mapDefinition.regionsById.b).toMatchObject({ coastal: true, seaNeighbors: ['a'] });
+  });
+
+  it('does not turn an inland region into a coast when adding a route', () => {
+    const definition = map();
+    definition.regionsById.a = definition.regions[0] = { ...definition.regionsById.a, coastal: false };
+    expect(createNavalRoute(definition, 'a', 'b')).toMatchObject({ ok: false, code: 'NON_COASTAL_ROUTE' });
+    expect(definition.regionsById.a.coastal).toBe(false);
   });
 
   it('rejects duplicate and self-routes without changing the map', () => {
@@ -67,6 +74,7 @@ describe('naval route editing and validation', () => {
   it('detects asymmetric, duplicate, unknown, self, and non-coastal routes', () => {
     const definition = map();
     definition.regionsById.a = definition.regions[0] = { ...definition.regionsById.a, coastal: true, seaNeighbors: ['b', 'b', 'missing', 'a'] };
+    definition.regionsById.b = definition.regions[1] = { ...definition.regionsById.b, coastal: false };
     const codes = validateMapDefinition(definition).errors.map((entry) => entry.code);
     expect(codes).toEqual(expect.arrayContaining(['DUPLICATE_ROUTE', 'UNKNOWN_NEIGHBOR', 'SELF_NEIGHBOR', 'NON_COASTAL_ROUTE', 'ASYMMETRIC_SEA_ROUTE']));
   });

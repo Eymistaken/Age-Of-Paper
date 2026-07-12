@@ -15,9 +15,7 @@ export function reduceFocusAction(state, action, localPlayerId) {
   const effectTypes = {
     claim: 'remote_claim',
     land_transfer: 'remote_operation',
-    naval_transfer: 'remote_operation',
     land_attack: 'remote_operation',
-    naval_attack: 'remote_operation',
   };
   if (!effectTypes[action.type] || action.actorId === localPlayerId || !regionId) {
     return { state: nextState, effect: null };

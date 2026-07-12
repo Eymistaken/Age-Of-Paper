@@ -25,7 +25,7 @@ import { advanceTurn, getActivePlayerId, removePlayerFromTurnState } from '../ga
 import { validateMapDefinition } from '../game/mapValidation';
 import { prepareSvgMap, rebuildPreparedMap, sanitizeSvgMarkup } from '../game/mapImporter';
 import { ANALYSIS_ALGORITHM_VERSION, deriveTerrainDocument } from '../game/terrainModel';
-import { applyNavalMapEdit } from '../game/navalRoutes';
+import { applyNavalPolicyEdit } from '../game/navalPolicy';
 import { buildRoomMapAssets } from './mapAssetService';
 import {
   applyBuildPort,
@@ -464,7 +464,7 @@ export async function configureNavalMap(roomCode, userId, edit) {
     if (room.hostId !== userId) throw new GameActionError('Deniz rotalarını yalnızca kurucu düzenleyebilir.', 'HOST_ONLY');
     if (room.phase !== PHASES.LOBBY) throw new GameActionError('Oyun başladıktan sonra deniz rotaları değiştirilemez.', 'ROOM_STARTED');
     if (!room.mapDefinition) throw new GameActionError('Önce geçerli bir harita yükle.', 'INVALID_MAP');
-    const result = applyNavalMapEdit(room.mapDefinition, edit);
+    const result = applyNavalPolicyEdit(room.mapDefinition, edit);
     if (!result.ok) throw new GameActionError(result.reason, result.code);
     const validation = validateMapDefinition(result.mapDefinition);
     transaction.update(reference, {
@@ -474,10 +474,10 @@ export async function configureNavalMap(roomCode, userId, edit) {
         type: 'naval_config',
         actorId: userId,
         editType: edit.type,
-        regionId: edit.regionId || null,
+        navalPolicy: edit.navalPolicy || null,
         firstId: edit.firstId || null,
         secondId: edit.secondId || null,
-        connected: edit.type === 'create_route' || (edit.type === 'route' && edit.connected !== false),
+        allowed: edit.allowed ?? null,
         actionId: `naval_config:${userId}:${Date.now()}`,
         at: Timestamp.now(),
       },

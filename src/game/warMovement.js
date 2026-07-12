@@ -1,5 +1,6 @@
 import { PHASES } from './phases';
-import { isSoldierAmount, requiredShips } from './warConstants';
+import { isSoldierAmount } from './warConstants';
+import { getNavalTargetEligibility } from './navalPolicy';
 
 function baseEligibility(room, playerId, sourceId, targetId, amount) {
   if (room?.phase !== PHASES.WAR) return { legal: false, code: 'WRONG_PHASE', reason: 'Harekât yalnızca savaş evresinde yapılabilir.' };
@@ -48,15 +49,7 @@ export function getLandTransferEligibility(room, playerId, sourceId, targetId, a
 }
 
 export function getNavalTransferEligibility(room, playerId, sourceId, targetId, amount) {
-  const base = baseEligibility(room, playerId, sourceId, targetId, amount);
-  if (!base.legal) return base;
-  if (base.targetClaim?.ownerId !== playerId) return { legal: false, code: 'INVALID_TARGET', reason: 'Hedef bölge senin değil.' };
-  if (!base.sourceRegion?.coastal || !base.targetRegion?.coastal) return { legal: false, code: 'NOT_COASTAL', reason: 'Deniz nakli iki kıyı bölgesi arasında yapılır.' };
-  if (!base.sourceClaim.hasPort) return { legal: false, code: 'PORT_REQUIRED', reason: 'Kaynak bölgede liman yok.' };
-  if (!base.sourceRegion.seaNeighbors?.includes(targetId)) return { legal: false, code: 'NO_SEA_ROUTE', reason: 'Bölgeler arasında doğrudan deniz rotası yok.' };
-  const shipsNeeded = requiredShips(amount);
-  if ((base.sourceClaim.ships || 0) < shipsNeeded) return { legal: false, code: 'INSUFFICIENT_SHIPS', reason: `${shipsNeeded} gemi kapasitesi gerekli.` };
-  return { ...base, shipsNeeded };
+  return getNavalTargetEligibility(room, playerId, 'move', sourceId, targetId, amount);
 }
 
 export function applyTransfer(room, playerId, sourceId, targetId, amount, type) {

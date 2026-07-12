@@ -3,7 +3,7 @@ import { calculateIncome } from '../game/economy';
 import { PHASES } from '../game/phases';
 import { isJoinRequestExpired, valueMillis } from '../game/joinRequests';
 import { getClaimEligibility, getLegalClaims } from '../game/rules';
-import { createWarPlan, getWarHighlights, selectWarRegion, startWarPlan } from '../game/warUiState';
+import { createWarPlan, getWarHighlights, getWarPlanEligibility, selectWarRegion, startWarPlan } from '../game/warUiState';
 import {
   readStoredUnread,
   unreadStorageKey,
@@ -83,7 +83,9 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
     isMyTurn && roomData.phase === PHASES.CLAIMING ? getLegalClaims(roomData.mapDefinition, roomData.claims, user.uid) : []
   ), [isMyTurn, roomData.claims, roomData.mapDefinition, roomData.phase, user.uid]);
   const warHighlights = useMemo(() => (
-    roomData.phase === PHASES.WAR ? getWarHighlights(roomData, user.uid, activeWarPlan) : { sources: [], targets: [] }
+    roomData.phase === PHASES.WAR ? getWarHighlights(roomData, user.uid, activeWarPlan) : {
+      sources: [], targets: [], invalidTargets: [], targetStates: {},
+    }
   ), [activeWarPlan, roomData, user.uid]);
   const unreadKey = useMemo(() => unreadStorageKey(roomCode, user.uid), [roomCode, user.uid]);
   const chatVisible = pageVisible && (compactViewport ? mobileChatVisible : true);
@@ -211,8 +213,20 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
           setSelectedId(regionId);
           return current;
         }
+        const highlights = getWarHighlights(roomData, user.uid, current);
+        const navalTargetState = current.routeType === 'naval' && current.sourceId
+          ? (highlights.targetStates?.[regionId] || getWarPlanEligibility(roomData, user.uid, current, regionId))
+          : null;
+        if (navalTargetState && !navalTargetState.legal) {
+          setSelectedId(regionId);
+          setActionError(navalTargetState.reason);
+          return current;
+        }
         const next = selectWarRegion(roomData, user.uid, current, regionId);
-        if (next !== current) setSelectedId(regionId);
+        if (next !== current) {
+          setSelectedId(regionId);
+          setActionError('');
+        }
         return { ...next, contextKey: warContextKey };
       });
       return;
@@ -326,6 +340,7 @@ export const GameRoom = ({ user, roomCode, roomData, leaveRoom, resetApp }) => {
         localPlayerId={user.uid}
         highlightSourceIds={warHighlights.sources}
         highlightTargetIds={warHighlights.targets}
+        highlightInvalidTargetIds={warHighlights.invalidTargets}
         showNavalRoutes={roomData.phase === PHASES.WAR && activeWarPlan.routeType === 'naval' && activeWarPlan.mode !== 'idle'}
       />
       <RightPanel {...shared} />

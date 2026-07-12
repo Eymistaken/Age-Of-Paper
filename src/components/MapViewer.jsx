@@ -4,6 +4,7 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
 } from 'react';
 import { createCameraAnimator } from '../game/cameraAnimator';
 import {
@@ -28,12 +29,17 @@ import { sanitizeSvgMarkup } from '../game/mapImporter';
 import { resolveRegionBoundsInRootViewBox } from '../game/svgGeometry';
 import { listNavalRoutes } from '../game/navalRoutes';
 import { PHASES } from '../game/phases';
+import { computeNavalPresentationPath } from '../game/waterNavigation';
+import { createNavalPresentationState, reduceNavalPresentation, sampleNavalPresentation } from '../game/navalPresentation';
 import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
 
 const FOCUS_HOLD_MS = 850;
 const CAMERA_ANIMATION_MS = 420;
 const MAX_FOCUS_FIT_MULTIPLIER = 4;
+const NAVAL_ANIMATION_MS = 1_350;
+const REMOTE_VOYAGE_MS = 1_850;
+const NAVAL_HIGHLIGHT_MS = 620;
 
 function reducedMotion() {
   return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -63,6 +69,7 @@ export const MapViewer = forwardRef(function MapViewer({
   className = '',
   highlightSourceIds = [],
   highlightTargetIds = [],
+  highlightInvalidTargetIds = [],
   showNavalRoutes = false,
   navalConfigActive = false,
   previewNavalRoute = null,
@@ -87,6 +94,10 @@ export const MapViewer = forwardRef(function MapViewer({
   const initialFitPendingRef = useRef(true);
   const externalRectInitializedRef = useRef(false);
   const containerSizeRef = useRef({ width: 0, height: 0 });
+  const navalFrameRef = useRef(null);
+  const navalTimerRef = useRef(null);
+  const automationGenerationRef = useRef(0);
+  const [navalVisual, setNavalVisual] = useState(null);
 
   const safeMapSvg = useMemo(() => {
     try {
@@ -113,6 +124,7 @@ export const MapViewer = forwardRef(function MapViewer({
   const geometryVersion = roomData.mapDefinition?.geometryVersion || 0;
   const boundsSpace = roomData.mapDefinition?.boundsSpace || '';
   const focusStateRef = useRef(createFocusState(lastAction));
+  const navalPresentationStateRef = useRef(createNavalPresentationState(lastAction));
 
   const paintFingerprint = useMemo(() => JSON.stringify((roomData.mapDefinition?.regionIds || []).map((id) => {
     const ownerId = roomData.claims?.[id]?.ownerId || '';
@@ -121,6 +133,7 @@ export const MapViewer = forwardRef(function MapViewer({
   const legalFingerprint = useMemo(() => [...legalClaims].sort().join('|'), [legalClaims]);
   const sourceFingerprint = useMemo(() => [...highlightSourceIds].sort().join('|'), [highlightSourceIds]);
   const targetFingerprint = useMemo(() => [...highlightTargetIds].sort().join('|'), [highlightTargetIds]);
+  const invalidTargetFingerprint = useMemo(() => [...highlightInvalidTargetIds].sort().join('|'), [highlightInvalidTargetIds]);
   const navalRoutes = useMemo(() => listNavalRoutes(roomData.mapDefinition), [roomData.mapDefinition]);
   const militaryVisible = [PHASES.MOBILIZATION, PHASES.WAR, PHASES.FINISHED].includes(roomData.phase);
 
@@ -147,6 +160,14 @@ export const MapViewer = forwardRef(function MapViewer({
     focusTimerRef.current = null;
   };
 
+  const clearNavalPresentation = () => {
+    window.cancelAnimationFrame(navalFrameRef.current);
+    window.clearTimeout(navalTimerRef.current);
+    navalFrameRef.current = null;
+    navalTimerRef.current = null;
+    setNavalVisual(null);
+  };
+
   const cancelFocusMeasurement = () => {
     focusMeasureRef.current.token += 1;
     window.cancelAnimationFrame(focusMeasureRef.current.frameId);
@@ -154,6 +175,7 @@ export const MapViewer = forwardRef(function MapViewer({
   };
 
   const cancelAutomationForManualInput = () => {
+    automationGenerationRef.current += 1;
     cancelFocusMeasurement();
     clearFocusTimer();
     animatorRef.current.cancel();
@@ -272,6 +294,7 @@ export const MapViewer = forwardRef(function MapViewer({
     const legal = new Set(legalFingerprint ? legalFingerprint.split('|') : []);
     const sources = new Set(sourceFingerprint ? sourceFingerprint.split('|') : []);
     const targets = new Set(targetFingerprint ? targetFingerprint.split('|') : []);
+    const invalidTargets = new Set(invalidTargetFingerprint ? invalidTargetFingerprint.split('|') : []);
     const paints = new Map(JSON.parse(paintFingerprint).map(([id, ownerId, color]) => [id, { ownerId, color }]));
     root.querySelectorAll('[data-region-id]').forEach((element) => {
       const id = element.getAttribute('data-region-id');
@@ -280,10 +303,11 @@ export const MapViewer = forwardRef(function MapViewer({
       element.classList.toggle('legal-land', legal.has(id));
       element.classList.toggle('source-land', sources.has(id));
       element.classList.toggle('target-land', targets.has(id));
+      element.classList.toggle('invalid-target-land', invalidTargets.has(id));
       element.classList.toggle('owned-land', Boolean(paint?.ownerId));
       element.style.fill = paint?.color || '#b7a370';
     });
-  }, [legalFingerprint, paintFingerprint, safeMapSvg, selectedId, sourceFingerprint, targetFingerprint]);
+  }, [invalidTargetFingerprint, legalFingerprint, paintFingerprint, safeMapSvg, selectedId, sourceFingerprint, targetFingerprint]);
 
   useEffect(() => {
     const bounds = normalizeBounds(viewBox);
@@ -369,12 +393,87 @@ export const MapViewer = forwardRef(function MapViewer({
     localPlayerId,
   ]);
 
+  useEffect(() => {
+    const previousPresentationState = navalPresentationStateRef.current;
+    const result = reduceNavalPresentation(previousPresentationState, lastAction);
+    navalPresentationStateRef.current = result.state;
+    if (!result.effect) return undefined;
+    clearNavalPresentation();
+    const effect = result.effect;
+    const generation = automationGenerationRef.current;
+    const path = computeNavalPresentationPath(roomData.mapNavigation, effect.sourceId, effect.targetId);
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      window.cancelAnimationFrame(navalFrameRef.current);
+      window.clearTimeout(navalTimerRef.current);
+      navalFrameRef.current = null;
+      setNavalVisual((current) => current ? { ...current, moving: false, point: null, opacity: 0 } : current);
+      navalTimerRef.current = window.setTimeout(() => {
+        setNavalVisual(null);
+        navalTimerRef.current = null;
+        if (automationGenerationRef.current === generation) {
+          queueRemoteClaimFocus(effect.targetId, actionRegionBounds, effect.actionId);
+        }
+      }, NAVAL_HIGHLIGHT_MS);
+    };
+    setNavalVisual({
+      actionId: effect.actionId,
+      sourceId: effect.sourceId,
+      targetId: effect.targetId,
+      operation: effect.operation,
+      moving: false,
+      point: null,
+      opacity: 0,
+    });
+    if (reducedMotion() || path.kind === 'highlight_only') {
+      navalTimerRef.current = window.setTimeout(finish, reducedMotion() ? 90 : NAVAL_HIGHLIGHT_MS);
+      return () => {
+        clearNavalPresentation();
+        if (navalPresentationStateRef.current.processedActionKey === effect.actionId) {
+          navalPresentationStateRef.current = previousPresentationState;
+        }
+      };
+    }
+    const startedAt = performance.now();
+    const duration = path.kind === 'remote_voyage' ? REMOTE_VOYAGE_MS : NAVAL_ANIMATION_MS;
+    const tick = (timestamp) => {
+      const progress = Math.min(1, Math.max(0, (timestamp - startedAt) / duration));
+      const sample = sampleNavalPresentation(path, progress);
+      setNavalVisual({
+        actionId: effect.actionId,
+        sourceId: effect.sourceId,
+        targetId: effect.targetId,
+        operation: effect.operation,
+        moving: sample.visible,
+        point: sample.point,
+        opacity: sample.opacity,
+      });
+      if (progress >= 1) { navalFrameRef.current = null; finish(); return; }
+      navalFrameRef.current = window.requestAnimationFrame(tick);
+    };
+    navalFrameRef.current = window.requestAnimationFrame(tick);
+    // requestAnimationFrame may be suspended for a background tab. The visual layer
+    // must still clean itself up without delaying or replaying the completed action.
+    navalTimerRef.current = window.setTimeout(finish, duration + 160);
+    return () => {
+      clearNavalPresentation();
+      if (navalPresentationStateRef.current.processedActionKey === effect.actionId) {
+        navalPresentationStateRef.current = previousPresentationState;
+      }
+    };
+    // Presentation identity and the local compact navigation asset are sufficient.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastActionKey, roomData.mapNavigation]);
+
   useEffect(() => () => {
     clearFocusTimer();
     cancelFocusMeasurement();
     // cancel() also supports React StrictMode's setup-cleanup-setup cycle.
     animatorRef.current.cancel();
     window.cancelAnimationFrame(mapInitFrameRef.current);
+    clearNavalPresentation();
     capturedPointersRef.current.forEach((pointerId) => {
       try {
         containerRef.current?.releasePointerCapture?.(pointerId);
@@ -578,6 +677,28 @@ export const MapViewer = forwardRef(function MapViewer({
                 </g>
               );
             })}
+            {navalVisual && (() => {
+              const source = roomData.mapDefinition?.regionsById?.[navalVisual.sourceId]?.bounds;
+              const target = roomData.mapDefinition?.regionsById?.[navalVisual.targetId]?.bounds;
+              return (
+                <g
+                  className={`aop-naval-presentation is-${navalVisual.operation}`}
+                  data-action-id={navalVisual.actionId}
+                >
+                  {source && <circle className="aop-voyage-highlight is-source" cx={source.x + source.width / 2} cy={source.y + source.height / 2} r={Math.max(6, Math.min(source.width, source.height) * .22)} />}
+                  {target && <circle className="aop-voyage-highlight is-target" cx={target.x + target.width / 2} cy={target.y + target.height / 2} r={Math.max(6, Math.min(target.width, target.height) * .22)} />}
+                  {navalVisual.moving && navalVisual.point && (
+                    <g
+                      className="aop-voyage-ship"
+                      opacity={navalVisual.opacity}
+                      transform={`translate(${navalVisual.point.x} ${navalVisual.point.y}) rotate(${navalVisual.point.angle || 0})`}
+                    >
+                      <path d="M-8 2 L8 2 L5 6 L-5 6 Z M-1 1 L-1 -8 L1 -8 L1 1 Z M1 -7 L7 -2 L1 -2 Z" />
+                    </g>
+                  )}
+                </g>
+              );
+            })()}
           </svg>
         )}
       </div>

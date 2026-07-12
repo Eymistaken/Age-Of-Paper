@@ -1,4 +1,5 @@
 import { summarizeRegionEconomy } from './pricing';
+import { NAVAL_POLICY_VALUES, isFinalCoastalLand, navalRouteKey, normalizeRoutePair } from './navalPolicy';
 
 export const SAFE_REGION_ID = /^[A-Za-z_][A-Za-z0-9_-]{0,79}$/;
 
@@ -102,6 +103,28 @@ export function validateMapDefinition(mapDefinition) {
   const adjacency = new Map(regions.map((region) => [region.id, []]));
   const reverse = new Map(regions.map((region) => [region.id, []]));
 
+  if (mapDefinition?.navalPolicy !== undefined && !NAVAL_POLICY_VALUES.includes(mapDefinition.navalPolicy)) {
+    errors.push(issue('INVALID_NAVAL_POLICY', 'Harita geçerli bir deniz politikası taşımalı.'));
+  }
+  for (const field of ['allowedRoutes', 'blockedRoutes']) {
+    if (mapDefinition?.[field] === undefined) continue;
+    if (!Array.isArray(mapDefinition[field])) {
+      errors.push(issue('INVALID_NAVAL_ROUTE_LIST', `${field} bir liste olmalı.`));
+      continue;
+    }
+    const seenRoutes = new Set();
+    for (const route of mapDefinition[field]) {
+      const pair = normalizeRoutePair(route);
+      const key = navalRouteKey(pair);
+      if (!pair || route !== key || seenRoutes.has(key)) {
+        errors.push(issue('INVALID_NAVAL_ROUTE', `${field} normalize edilmiş ve benzersiz çiftler içermeli.`));
+      } else if (!isFinalCoastalLand(byId.get(pair[0])) || !isFinalCoastalLand(byId.get(pair[1]))) {
+        errors.push(issue('NON_COASTAL_ROUTE', `${field} yalnızca nihai kıyı kara bölgelerini bağlayabilir.`));
+      }
+      seenRoutes.add(key);
+    }
+  }
+
   for (const region of regions) {
     for (const field of ['landNeighbors', 'claimNeighbors', 'seaNeighbors']) {
       const seenNeighbors = new Set();
@@ -155,7 +178,8 @@ export function validateMapDefinition(mapDefinition) {
     }
   }
 
-  if (regions.some((region) => region.coastal) && !regions.some((region) => region.seaNeighbors?.length)) {
+  if ((mapDefinition.navalPolicy === 'selected_routes' && regions.some((region) => region.coastal) && !(mapDefinition.allowedRoutes || []).length)
+    || (mapDefinition.navalPolicy === undefined && regions.some((region) => region.coastal) && !regions.some((region) => region.seaNeighbors?.length))) {
     warnings.push(issue('COASTAL_WITHOUT_ROUTES', 'Kıyı bölgeleri var, ancak deniz rotası yapılandırılmamış. Harita kara oyunu için yine kullanılabilir.'));
   }
 

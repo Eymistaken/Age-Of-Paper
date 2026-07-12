@@ -3,7 +3,7 @@ import { applyAutomaticPricing, PRICING_VERSION, summarizeRegionEconomy } from '
 import { boundsArea } from './svgGeometry';
 import { inferBoundaryAdjacency } from './svgAdjacency';
 import { extractSurfaceCandidates, normalizeRegionId } from './surfaceCandidates';
-import { ANALYSIS_ALGORITHM_VERSION } from './terrainModel';
+import { ANALYSIS_ALGORITHM_VERSION, EDITOR_SCHEMA_VERSION, METADATA_SCHEMA_VERSION } from './terrainModel';
 
 export { normalizeRegionId } from './surfaceCandidates';
 
@@ -277,6 +277,11 @@ export function validatePreparedMapRecord(record, { allowOutdatedAnalysis = fals
   if (!Array.isArray(record.terrainDocument.surfaces) || !record.terrainDocument.surfaces.length) {
     throw new Error('Yerel harita terrain yüzeyleri eksik.');
   }
+  const editorVersion = record.terrainDocument.editorSchemaVersion ?? 1;
+  const metadataVersion = record.terrainDocument.metadataSchemaVersion ?? 1;
+  if (![1, EDITOR_SCHEMA_VERSION].includes(editorVersion) || ![1, METADATA_SCHEMA_VERSION].includes(metadataVersion)) {
+    throw new Error('Yerel harita şema sürümü desteklenmiyor.');
+  }
   if (record.compactMetadata?.mapId && record.compactMetadata.mapId !== record.mapId) {
     throw new Error('Yerel harita kimliği metadata ile eşleşmiyor.');
   }
@@ -356,6 +361,10 @@ export async function prepareSvgMap(svgText, options = {}) {
           baseSvgHash,
           analysisAlgorithmVersion: extracted.metadata.analysisAlgorithmVersion,
           compatibilityRoutes: extracted.metadata.compatibilityRoutes,
+          navalPolicy: extracted.metadata.navalPolicy,
+          allowedRoutes: extracted.metadata.allowedRoutes,
+          blockedRoutes: extracted.metadata.blockedRoutes,
+          navigationMask: extracted.metadata.navigationMask,
           importIssues: extracted.metadata.importIssues,
           surfaces: regenerated.surfaces.map((surface) => importedById[surface.id]
             ? {
@@ -381,6 +390,10 @@ export async function prepareSvgMap(svgText, options = {}) {
           viewBox: extracted.metadata.viewBox,
           analysisAlgorithmVersion: extracted.metadata.analysisAlgorithmVersion,
           compatibilityRoutes: extracted.metadata.compatibilityRoutes,
+          navalPolicy: extracted.metadata.navalPolicy,
+          allowedRoutes: extracted.metadata.allowedRoutes,
+          blockedRoutes: extracted.metadata.blockedRoutes,
+          navigationMask: extracted.metadata.navigationMask,
           importIssues: extracted.metadata.importIssues,
           surfaces: extracted.metadata.surfaces.map((surface) => ({
             ...surface,
@@ -461,6 +474,7 @@ export async function rebuildPreparedMap(preparedMap, nextTerrainDocument, optio
     hashText,
   } = await import('./mapMetadata');
   const { ANALYSIS_ALGORITHM_VERSION, buildCompatibilityMapDefinition, deriveTerrainDocument } = await import('./terrainModel');
+  const { buildNavigationMask } = await import('./waterNavigation');
   if (nextTerrainDocument.analysisAlgorithmVersion !== ANALYSIS_ALGORITHM_VERSION) {
     throw new Error('Bu taslak önceki analiz algoritmasını kullanıyor. Önce “Analizi Sıfırla” ile yeniden analiz et.');
   }
@@ -483,6 +497,7 @@ export async function rebuildPreparedMap(preparedMap, nextTerrainDocument, optio
       }
       : surface),
   });
+  terrainDocument = { ...terrainDocument, navigationMask: buildNavigationMask(terrainDocument) };
   mapDefinition = buildCompatibilityMapDefinition(terrainDocument);
   const validation = validateMapDefinition(mapDefinition);
   const fullMetadata = createMetadataPackage(terrainDocument);

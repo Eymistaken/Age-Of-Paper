@@ -7,8 +7,8 @@ Age of Paper metadata turns an ordinary, sanitized SVG into a reusable prepared 
 Detection never depends on the filename or the optional `_ageofpaper` suffix. Importers look for one inert SVG node:
 
 ```xml
-<metadata id="age-of-paper-map" data-aop-schema-version="1">
-  {"schemaVersion":1,"mapId":"map_neutral_1","revision":3}
+<metadata id="age-of-paper-map" data-aop-schema-version="2">
+  {"schemaVersion":2,"mapId":"map_neutral_1","revision":3}
 </metadata>
 ```
 
@@ -16,8 +16,8 @@ The node contains JSON text, not executable markup. JSON is serialized with recu
 
 ## Versions and identity
 
-- `schemaVersion: 1` is the exported metadata schema.
-- `editorVersion: 1` identifies the local editor document contract.
+- `schemaVersion: 2` is the exported metadata schema. Version 1 packages migrate explicitly on import.
+- `editorVersion: 2` identifies the local editor document contract.
 - `analysisAlgorithmVersion: "terrain-grid-v2"` identifies the automatic classification, owned-surface extraction, and negative-space algorithm. Version 1 drafts require explicit reanalysis.
 - `mapId` is the stable logical map identity. Editing and exporting preserves it.
 - `revision` is a positive integer. Applying a changed draft to a room increments it.
@@ -106,7 +106,7 @@ Synthetic components use compact row runs:
 }
 ```
 
-Each pair is an inclusive linear cell range and never crosses a row. A component touching the root grid boundary is initially `ocean`; a fully enclosed component is initially `lake`. Stable synthetic IDs derive from normalized component cells. IndexedDB drafts retain this geometry. Compact SVG export and Firestore metadata omit reproducible grid and editor evidence; the same analysis version regenerates it from the hash-matched base SVG.
+Each pair is an inclusive linear cell range and never crosses a row. A component touching the root grid boundary is initially `ocean`; a fully enclosed component is initially `lake`. Stable synthetic IDs derive from normalized component cells. IndexedDB drafts retain full surface geometry. Compact SVG export and Firestore metadata omit editor evidence and per-surface boundary detail, but retain the smaller component-run navigation mask required for deterministic ship presentation.
 
 ## Coasts, adjacency, and ports
 
@@ -114,7 +114,11 @@ Each pair is an inclusive linear cell range and never crosses a row. A component
 
 `portAllowed: true` is valid only when effective terrain is land and `coastType` is not `none`. New coastal land defaults to true. The host may set `portPreference: false`; inland and non-land surfaces are forced to `portAllowed: false` regardless of stale metadata.
 
-`compatibilityRoutes` contains normalized two-element ID pairs for the existing naval combat model. Derivation keeps a route only when both endpoints remain coastal land. Port permission does not fabricate a route. Current claiming uses the derived land-only `landNeighbors` and `claimNeighbors` graph; a disconnected playable graph remains a blocking validation error.
+Deniz erişimi üç seyrek alan kullanır: `navalPolicy`, `allowedRoutes`, and `blockedRoutes`. `all_coasts` bütün nihai kıyı kara çiftlerini açar ve yalnız `blockedRoutes` istisnalarını saklar; complete graph üretilmez. `selected_routes` yalnız `allowedRoutes` çiftlerini açar. `disabled` bütün deniz harekâtını kapatırken iki listeyi korur. Çiftler sırasız semantiğe sahip, leksikografik normalize edilmiş ve benzersizdir. Rota eklemek terrain veya kıyı üretmez. Legacy `compatibilityRoutes`/`seaNeighbors` verisi `selected_routes` + `allowedRoutes` olarak migrate edilir.
+
+SVG/IndexedDB metadata çiftleri iki elemanlı diziler olarak tutar. Firestore nested-array kabul etmediği için canlı `mapDefinition` aynı çiftleri güvenli bölge kimliklerinden üretilmiş `first::second` anahtarlarıyla saklar; importer ve saf politika katmanı iki biçimi aynı canonical çifte normalize eder. Metadata room asset’i, navigasyon koşullarını da güvenli taşımak için canonical JSON string olarak yazılır ve hash/size/schema doğrulamasından sonra parse edilir.
+
+Compact metadata ayrıca yalnız görsel gemi rotası için gerekli deterministik `navigationMask` kaydını taşır: root viewBox grid boyutu, bileşen bazlı sıkıştırılmış su hücre koşuları ve kıyı yaklaşım hücreleri. Kara ve ignored hücreleri geçilemez; final ocean/lake hücreleri geçilebilirdir. Bu maske transaction kararlarına katılmaz ve canlı room belgesine kopyalanmaz. Current claiming uses the derived land-only `landNeighbors` and `claimNeighbors` graph; a disconnected playable graph remains a blocking validation error.
 
 ## Full local document versus compact export/package
 
@@ -125,10 +129,10 @@ The full IndexedDB editor document preserves:
 - host overrides and effective terrain;
 - transformed bounds and sampled boundaries;
 - synthetic water geometry;
-- coasts, adjacency, port permissions, compatibility routes;
+- coasts, adjacency, port permissions, naval policy/route exceptions, and the compact visual navigation mask;
 - map/editor/analysis versions and hashes.
 
-SVG exports and room metadata use the same compact, versioned representation. It preserves `mapId`, revision, classifications, host overrides, effective terrain, coast/port results, game adjacency, compatibility routes, prices, and hashes. It omits history, thumbnail, original draft, detailed confidence evidence, transformed boundary samples, and large reproducible grid geometry. This keeps an export from exceeding the importer limit merely because derived geometry was duplicated into the file.
+SVG exports and room metadata use the same compact, versioned representation. It preserves `mapId`, revision, classifications, host overrides, effective terrain, coast/port results, game adjacency, naval policy, sparse route exceptions, prices, hashes, and the compressed visual navigation mask. It omits history, thumbnail, original draft, detailed confidence evidence, and transformed boundary samples. This keeps the authoritative room document small while allowing every client to present the same viewBox-stable ship route.
 
 ## Content-addressed room transport
 
@@ -143,7 +147,7 @@ New room maps do not keep the large SVG inline in the live room document. The ro
     "revision": 3,
     "baseSvgHash": "…",
     "metadataHash": "…",
-    "metadataSchemaVersion": 1,
+    "metadataSchemaVersion": 2,
     "analysisAlgorithmVersion": "terrain-grid-v2",
     "mapDefinitionVersion": 1
   },
@@ -207,4 +211,4 @@ A valid compact-metadata SVG export reimports to the same map ID, effective terr
 
 When a local record already has the same `mapId`, the importer asks to update it, import a new copy, or cancel. When source geometry differs, it asks to remap matching IDs, rerun analysis, import a new map, or cancel. Remapping copies only metadata for IDs that actually exist after fresh analysis. Mismatched metadata is never applied silently.
 
-Future schemas must add an explicit migration from the previous supported version. Invalid, version 1, or unknown embedded editor metadata is rejected as prepared game data and never silently converted into a newly identified map; migration or an explicit force-reanalysis path is required.
+Future schemas must add an explicit migration from the previous supported version. Metadata/editor version 1 migrates to version 2 by preserving valid legacy route pairs in `selected_routes`; a route-less prepared map receives the new `all_coasts` default. Unknown versions remain rejected and require an explicit migration or force-reanalysis path.

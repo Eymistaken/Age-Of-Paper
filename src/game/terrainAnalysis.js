@@ -2,6 +2,7 @@ import { sanitizeSvgMarkup } from './mapImporter';
 import { inferBoundaryAdjacency } from './svgAdjacency';
 import { ANALYSIS_ALGORITHM_VERSION, deriveTerrainDocument, TERRAIN_TYPES } from './terrainModel';
 import { extractSurfaceCandidates, normalizeRegionId } from './surfaceCandidates';
+import { buildNavigationMask } from './waterNavigation';
 
 const TERRAIN_SET = new Set(TERRAIN_TYPES);
 const LAKE_WORDS = /(^|[\s_-])(lake|pond|reservoir)([\s_-]|$)/i;
@@ -342,6 +343,7 @@ export async function analyzeSvgTerrain({ svgText, signal, onProgress } = {}) {
       }] : []),
     ],
   });
+  result.navigationMask = buildNavigationMask(result);
   onProgress?.({ phase: 'done', progress: 1, message: 'Arazi analizi tamamlandı.' });
   return { ...result, sanitizedSvg: new XMLSerializer().serializeToString(svg) };
 }

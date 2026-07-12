@@ -53,6 +53,12 @@ async function renderInspector(selectedIds = [], inspectedId = null, overrides =
       section={overrides.section}
       onSectionChange={overrides.onSectionChange}
       classificationFocusRequest={overrides.classificationFocusRequest || 0}
+      readOnly={overrides.readOnly || false}
+      navalSourceId={overrides.navalSourceId}
+      onNavalSourceChange={overrides.onNavalSourceChange || vi.fn()}
+      onNavalPolicyChange={overrides.onNavalPolicyChange || vi.fn()}
+      onNavalRouteToggle={overrides.onNavalRouteToggle || vi.fn()}
+      onResetNavalRoutes={overrides.onResetNavalRoutes || vi.fn()}
     />,
   ));
 }
@@ -114,5 +120,28 @@ describe('terrain inspector responsibility split', () => {
     await act(async () => rows.at(-1).click());
     expect(onSectionChange).toHaveBeenCalledWith('terrain');
     expect(onReviewSurface).toHaveBeenCalledWith('z');
+  });
+
+  it('shows all three policies and green/red source targets without granting read-only edits', async () => {
+    const navalDocument = deriveTerrainDocument({
+      mapId: 'map_naval', displayName: 'Naval', revision: 1,
+      navalPolicy: 'selected_routes', allowedRoutes: [['coast_a', 'coast_b']], blockedRoutes: [],
+      surfaces: [
+        { id: 'coast_a', name: 'Okyanus A', automatic: { terrainType: 'land', confidence: 1 }, adjacentSurfaceIds: ['sea'] },
+        { id: 'coast_b', name: 'Göl B', automatic: { terrainType: 'land', confidence: 1 }, adjacentSurfaceIds: ['lake'], portPreference: false },
+        { id: 'coast_c', name: 'İki Kıyı C', automatic: { terrainType: 'land', confidence: 1 }, adjacentSurfaceIds: ['sea', 'lake'] },
+        { id: 'sea', name: 'Deniz', automatic: { terrainType: 'ocean', confidence: 1 }, adjacentSurfaceIds: ['coast_a', 'coast_c'] },
+        { id: 'lake', name: 'Göl', automatic: { terrainType: 'lake', confidence: 1 }, adjacentSurfaceIds: ['coast_b', 'coast_c'] },
+      ],
+    });
+    const onPolicy = vi.fn();
+    await renderInspector([], null, { document: navalDocument, section: 'naval', navalSourceId: 'coast_a', onNavalPolicyChange: onPolicy, readOnly: true });
+    const select = container.querySelector('[aria-label="Deniz politikası"]');
+    expect([...select.options].map((option) => option.value)).toEqual(['all_coasts', 'selected_routes', 'disabled']);
+    expect(select.disabled).toBe(true);
+    expect(container.querySelectorAll('.aop-naval-target-list .is-allowed')).toHaveLength(1);
+    expect(container.querySelectorAll('.aop-naval-target-list .is-blocked')).toHaveLength(1);
+    expect(container.textContent).toContain('Liman kurulamaz');
+    expect(container.textContent).toContain('Salt okunur görünüm');
   });
 });

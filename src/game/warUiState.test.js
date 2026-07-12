@@ -31,7 +31,10 @@ describe('war interaction state', () => {
 
   it('highlights only legal sources and targets and reset is idle', () => {
     const plan = selectWarRegion(room, 'p1', startWarPlan('move', 'naval'), 'a');
-    expect(getWarHighlights(room, 'p1', plan)).toEqual({ sources: ['a'], targets: [] });
+    expect(getWarHighlights(room, 'p1', plan)).toMatchObject({
+      sources: ['a'], targets: [], invalidTargets: ['b'],
+      targetStates: { b: { code: 'ENEMY_TRANSFER_TARGET' } },
+    });
     expect(createWarPlan().mode).toBe(WAR_INTERACTION_MODES.IDLE);
   });
 });

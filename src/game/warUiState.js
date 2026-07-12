@@ -1,6 +1,7 @@
 import { getLandAttackEligibility, getNavalAttackEligibility } from './warCombat';
 import { getLandTransferEligibility, getNavalTransferEligibility } from './warMovement';
 import { SOLDIER_BATCH } from './warConstants';
+import { isFinalCoastalLand } from './navalPolicy';
 
 export const WAR_INTERACTION_MODES = Object.freeze({
   IDLE: 'idle',
@@ -43,10 +44,18 @@ export function getWarHighlights(room, playerId, plan) {
     const region = room.mapDefinition?.regionsById?.[id];
     return claim?.ownerId === playerId
       && (claim.soldiers || 0) >= SOLDIER_BATCH
-      && (plan.routeType !== 'naval' || (region?.coastal && claim.hasPort && claim.ships > 0));
+      && (plan.routeType !== 'naval' || (
+        isFinalCoastalLand(region) && region.portAllowed !== false && claim.hasPort && claim.ships > 0
+      ));
   }) : plan.sourceId ? [plan.sourceId] : [];
-  const targets = plan.sourceId ? ids.filter((id) => getWarPlanEligibility(room, playerId, plan, id).legal) : [];
-  return { sources, targets };
+  const targetStates = plan.sourceId ? Object.fromEntries(ids
+    .filter((id) => id !== plan.sourceId && (
+      plan.routeType !== 'naval' || isFinalCoastalLand(room.mapDefinition?.regionsById?.[id])
+    ))
+    .map((id) => [id, getWarPlanEligibility(room, playerId, plan, id)])) : {};
+  const targets = Object.keys(targetStates).filter((id) => targetStates[id].legal);
+  const invalidTargets = Object.keys(targetStates).filter((id) => !targetStates[id].legal);
+  return { sources, targets, invalidTargets, targetStates };
 }
 
 export function selectWarRegion(room, playerId, plan, regionId) {

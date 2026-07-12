@@ -570,9 +570,10 @@ describe('lobby naval configuration security rules', () => {
       ...base,
       mapDefinition: {
         ...base.mapDefinition,
+        navalPolicy: 'selected_routes', allowedRoutes: [], blockedRoutes: [],
         regionsById: {
-          r1: { ...base.mapDefinition.regionsById.r1, coastal: false, seaNeighbors: [] },
-          r2: { ...base.mapDefinition.regionsById.r2, coastal: false, seaNeighbors: [] },
+          r1: { ...base.mapDefinition.regionsById.r1, coastType: 'ocean', portAllowed: true, seaNeighbors: [] },
+          r2: { ...base.mapDefinition.regionsById.r2, coastType: 'lake', portAllowed: true, seaNeighbors: [] },
         },
       },
     };
@@ -582,32 +583,30 @@ describe('lobby naval configuration security rules', () => {
     return {
       mapDefinition: {
         ...room.mapDefinition,
-        regionsById: {
-          r1: { ...room.mapDefinition.regionsById.r1, coastal: true, seaNeighbors: ['r2'] },
-          r2: { ...room.mapDefinition.regionsById.r2, coastal: true, seaNeighbors: ['r1'] },
-        },
+        allowedRoutes: ['r1::r2'],
       },
       mapValidation: { valid: true },
       lastAction: {
-        type: 'naval_config', actorId, editType: 'create_route', firstId: 'r1', secondId: 'r2',
-        regionId: null, connected: true, actionId: `naval:${actorId}`, at: Timestamp.now(),
+        type: 'naval_config', actorId, editType: 'route', firstId: 'r1', secondId: 'r2',
+        allowed: true, actionId: `naval:${actorId}`, at: Timestamp.now(),
       },
     };
   }
 
-  it('allows the host to save both coastal endpoints and their symmetric route in one write', async () => {
+  it('allows the host to save a normalized route without changing terrain-derived coasts', async () => {
     const room = navalLobby();
     await seed('NAVAL_HOST', room);
     await assertSucceeds(updateDoc(doc(context('host'), 'rooms', 'NAVAL_HOST'), combinedRouteUpdate(room)));
     const stored = (await getDoc(doc(context('host'), 'rooms', 'NAVAL_HOST'))).data();
-    expect(stored.mapDefinition.regionsById.r1).toMatchObject({ coastal: true, seaNeighbors: ['r2'] });
-    expect(stored.mapDefinition.regionsById.r2).toMatchObject({ coastal: true, seaNeighbors: ['r1'] });
+    expect(stored.mapDefinition.allowedRoutes).toEqual(['r1::r2']);
+    expect(stored.mapDefinition.regionsById).toEqual(room.mapDefinition.regionsById);
   });
 
   it('rejects the same mutation from a non-host or after the lobby', async () => {
     const room = navalLobby();
     await seed('NAVAL_MEMBER', room);
     await assertFails(updateDoc(doc(context('a'), 'rooms', 'NAVAL_MEMBER'), combinedRouteUpdate(room, 'a')));
+    await assertFails(updateDoc(doc(context('outsider'), 'rooms', 'NAVAL_MEMBER'), combinedRouteUpdate(room, 'outsider')));
     const started = { ...room, phase: 'claiming', turnOrder: ['host', 'a'], turnIndex: 0, turnNumber: 1, roundNumber: 1 };
     await seed('NAVAL_STARTED', started);
     await assertFails(updateDoc(doc(context('host'), 'rooms', 'NAVAL_STARTED'), combinedRouteUpdate(started)));
@@ -643,6 +642,12 @@ describe('content addressed map asset security rules', () => {
     metadata: { schemaVersion: 1 }, size: 19, createdAt: Timestamp.now(), createdBy: 'host',
   };
 
+  const metadataJson = '{"schemaVersion":2,"navalPolicy":"all_coasts","allowedRoutes":[],"blockedRoutes":[]}';
+  const metadataAssetV2 = {
+    kind: 'metadata', schemaVersion: 2, hash: 'v2meta', mapId: 'map_neutral', revision: 2,
+    metadata: metadataJson, size: metadataJson.length, createdAt: Timestamp.now(), createdBy: 'host',
+  };
+
   it('allows only the lobby host to write immutable hash assets and the manifest', async () => {
     const room = lobby();
     await seed('ASSET_HOST', room);
@@ -674,6 +679,14 @@ describe('content addressed map asset security rules', () => {
     await assertSucceeds(getDoc(doc(context('a'), 'rooms', 'ASSET_READ', 'mapAssets', 'metadata_def456')));
     await assertFails(getDoc(doc(context('outsider'), 'rooms', 'ASSET_READ', 'mapAssets', 'base_abc123')));
     await assertFails(getDoc(doc(context('outsider'), 'rooms', 'ASSET_READ', 'mapAssets', 'metadata_def456')));
+  });
+
+  it('accepts canonical metadata v2 as a bounded string and rejects a forged size', async () => {
+    const room = lobby();
+    await seed('ASSET_V2', room);
+    await assertSucceeds(setDoc(doc(context('host'), 'rooms', 'ASSET_V2', 'mapAssets', 'metadata_v2meta'), metadataAssetV2));
+    await seed('ASSET_V2_BAD', room);
+    await assertFails(setDoc(doc(context('host'), 'rooms', 'ASSET_V2_BAD', 'mapAssets', 'metadata_v2meta'), { ...metadataAssetV2, size: metadataJson.length - 1 }));
   });
 });
 
@@ -727,6 +740,19 @@ describe('mobilization and war security rules', () => {
     };
     await seed('DENIED_PORT', denied);
     await assertFails(updateDoc(doc(context('host'), 'rooms', 'DENIED_PORT'), buildPortUpdate(denied)));
+
+    const forgedInland = {
+      ...legacy,
+      mapDefinition: {
+        ...legacy.mapDefinition,
+        regionsById: {
+          ...legacy.mapDefinition.regionsById,
+          r1: { ...legacy.mapDefinition.regionsById.r1, coastType: 'none', portAllowed: true },
+        },
+      },
+    };
+    await seed('FORGED_INLAND_PORT', forgedInland);
+    await assertFails(updateDoc(doc(context('host'), 'rooms', 'FORGED_INLAND_PORT'), buildPortUpdate(forgedInland)));
   });
 
   it('rejects non-active attacks and naval attacks without ship capacity', async () => {
@@ -742,6 +768,40 @@ describe('mobilization and war security rules', () => {
     naval.claims.r1 = { ...naval.claims.r1, ships: room.claims.r1.ships };
     naval.lastAction.amount = 4000;
     await assertFails(updateDoc(doc(context('host'), 'rooms', 'NO_CAPACITY'), naval));
+  });
+
+  it('enforces policy routes, disabled ports, and stale naval turns', async () => {
+    const base = warRoom();
+    const selected = {
+      ...base,
+      mapDefinition: {
+        ...base.mapDefinition,
+        navalPolicy: 'selected_routes',
+        allowedRoutes: ['r1::r2'],
+        blockedRoutes: [],
+      },
+    };
+    const naval = captureUpdate(selected);
+    naval.lastAction = { ...naval.lastAction, type: 'naval_attack', actionId: '3:naval_attack:host:r2' };
+    await seed('POLICY_ALLOWED', selected);
+    await assertSucceeds(updateDoc(doc(context('host'), 'rooms', 'POLICY_ALLOWED'), naval));
+
+    const missing = { ...selected, mapDefinition: { ...selected.mapDefinition, allowedRoutes: [] } };
+    await seed('POLICY_MISSING', missing);
+    await assertFails(updateDoc(doc(context('host'), 'rooms', 'POLICY_MISSING'), naval));
+
+    const stale = captureUpdate(selected);
+    stale.lastAction = { ...stale.lastAction, type: 'naval_attack', turnNumber: 2, actionId: '2:naval_attack:host:r2' };
+    await seed('POLICY_STALE', selected);
+    await assertFails(updateDoc(doc(context('host'), 'rooms', 'POLICY_STALE'), stale));
+
+    const disabled = {
+      ...selected,
+      mapDefinition: { ...selected.mapDefinition, navalPolicy: 'disabled' },
+      claims: { ...selected.claims, r1: { ...selected.claims.r1, hasPort: false, ships: 0 } },
+    };
+    await seed('POLICY_DISABLED_PORT', disabled);
+    await assertFails(updateDoc(doc(context('host'), 'rooms', 'POLICY_DISABLED_PORT'), buildPortUpdate(disabled)));
   });
 
   it('rejects every economy action after victory', async () => {

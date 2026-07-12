@@ -1,9 +1,15 @@
 import { applyAutomaticPricing, PRICING_VERSION, summarizeRegionEconomy } from './pricing';
+import {
+  NAVAL_POLICIES,
+  migrateLegacyNavalPolicy,
+  navalRouteKey,
+  normalizeRouteList,
+} from './navalPolicy';
 
 export const TERRAIN_TYPES = Object.freeze(['land', 'ocean', 'lake', 'ignored']);
 export const CLASSIFICATION_SOURCES = Object.freeze(['automatic', 'metadata', 'host_override']);
-export const EDITOR_SCHEMA_VERSION = 1;
-export const METADATA_SCHEMA_VERSION = 1;
+export const EDITOR_SCHEMA_VERSION = 2;
+export const METADATA_SCHEMA_VERSION = 2;
 export const ANALYSIS_ALGORITHM_VERSION = 'terrain-grid-v2';
 
 const TERRAIN_SET = new Set(TERRAIN_TYPES);
@@ -56,25 +62,6 @@ export function normalizeSurface(surface, index = 0) {
   };
 }
 
-function routeKey(first, second) {
-  return [first, second].sort().join('\u0000');
-}
-
-function normalizeRoutes(routes = []) {
-  const result = [];
-  const seen = new Set();
-  for (const route of routes) {
-    if (!Array.isArray(route) || route.length !== 2 || route[0] === route[1]) continue;
-    const pair = [String(route[0]), String(route[1])].sort();
-    const key = routeKey(...pair);
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(pair);
-    }
-  }
-  return result.sort((a, b) => routeKey(...a).localeCompare(routeKey(...b)));
-}
-
 export function summarizeTerrain(surfaces) {
   const counts = Object.fromEntries(TERRAIN_TYPES.map((type) => [type, 0]));
   let coastalLandCount = 0;
@@ -116,23 +103,26 @@ export function deriveTerrainDocument(document = {}) {
     };
   });
   const surfacesById = Object.fromEntries(surfaces.map((surface) => [surface.id, surface]));
-  const routes = normalizeRoutes(document.compatibilityRoutes);
-  const validCompatibilityRoutes = routes.filter(([first, second]) => (
-    surfacesById[first]?.terrainType === 'land'
-    && surfacesById[second]?.terrainType === 'land'
-    && surfacesById[first].coastType !== 'none'
-    && surfacesById[second].coastType !== 'none'
-  ));
-  const validKeys = new Set(validCompatibilityRoutes.map((route) => routeKey(...route)));
+  const migrated = migrateLegacyNavalPolicy(document, { defaultPolicy: NAVAL_POLICIES.ALL_COASTS });
+  const allowed = normalizeRouteList(migrated.allowedRoutes, { surfacesById, keepInvalid: true });
+  const blocked = normalizeRouteList(migrated.blockedRoutes, { surfacesById, keepInvalid: true });
+  const validCompatibilityRoutes = allowed.routes;
+  const invalidatedCompatibilityRoutes = [...allowed.invalidRoutes, ...blocked.invalidRoutes]
+    .filter((route, index, routes) => routes.findIndex((candidate) => navalRouteKey(candidate) === navalRouteKey(route)) === index)
+    .sort((first, second) => navalRouteKey(first).localeCompare(navalRouteKey(second)));
   return {
     ...document,
-    editorSchemaVersion: document.editorSchemaVersion || EDITOR_SCHEMA_VERSION,
-    metadataSchemaVersion: document.metadataSchemaVersion || METADATA_SCHEMA_VERSION,
+    editorSchemaVersion: EDITOR_SCHEMA_VERSION,
+    metadataSchemaVersion: METADATA_SCHEMA_VERSION,
     analysisAlgorithmVersion: document.analysisAlgorithmVersion || ANALYSIS_ALGORITHM_VERSION,
     surfaces,
     surfacesById,
+    navalPolicy: migrated.navalPolicy,
+    allowedRoutes: allowed.routes,
+    blockedRoutes: blocked.routes,
+    compatibilityRoutes: allowed.routes,
     validCompatibilityRoutes,
-    invalidatedCompatibilityRoutes: routes.filter((route) => !validKeys.has(routeKey(...route))),
+    invalidatedCompatibilityRoutes,
     summary: summarizeTerrain(surfaces),
   };
 }
@@ -152,7 +142,8 @@ export function buildCompatibilityMapDefinition(document) {
     explicitIncome: Number.isFinite(surface.income) ? surface.income : null,
   }))).records;
   const routeNeighbors = new Map(land.map((surface) => [surface.id, []]));
-  for (const [first, second] of derived.validCompatibilityRoutes || []) {
+  for (const [first, second] of derived.navalPolicy === NAVAL_POLICIES.SELECTED_ROUTES
+    ? (derived.allowedRoutes || []) : []) {
     routeNeighbors.get(first)?.push(second);
     routeNeighbors.get(second)?.push(first);
   }
@@ -185,6 +176,9 @@ export function buildCompatibilityMapDefinition(document) {
     boundsSpace: 'viewBox',
     terrainSchemaVersion: METADATA_SCHEMA_VERSION,
     analysisAlgorithmVersion: derived.analysisAlgorithmVersion,
+    navalPolicy: derived.navalPolicy,
+    allowedRoutes: (derived.allowedRoutes || []).map(navalRouteKey),
+    blockedRoutes: (derived.blockedRoutes || []).map(navalRouteKey),
     viewBox: derived.viewBox,
     regionIds: regions.map((region) => region.id),
     regions,

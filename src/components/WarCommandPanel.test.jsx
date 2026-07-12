@@ -68,4 +68,44 @@ describe('war command panel', () => {
     expect(container.querySelector('.aop-war-orders.is-compact')).not.toBeNull();
     expect(container.textContent).toContain('Harekât Yapmadan Turu Bitir');
   });
+
+  it('shows only port construction before the player gains a port and hides all naval controls when disabled', async () => {
+    const coastalRegions = {
+      a: { ...regions.a, coastal: true, coastType: 'ocean', portAllowed: true },
+      b: { ...regions.b, coastal: true, coastType: 'lake', portAllowed: true },
+    };
+    const navalRoom = {
+      ...roomData,
+      mapDefinition: {
+        regionIds: ['a', 'b'], regionsById: coastalRegions,
+        navalPolicy: 'all_coasts', allowedRoutes: [], blockedRoutes: [],
+      },
+    };
+    await act(async () => root.render(
+      <WarCommandPanel
+        roomData={navalRoom} me={me} currentPlayer={me} isMyTurn selectedRegion={coastalRegions.a}
+        selectedClaim={navalRoom.claims.a} selectedOwner={me} plan={{ mode: 'idle', operation: null, routeType: 'land', sourceId: null, targetId: null, amount: 1000 }}
+        setPlan={() => {}} beginPlan={() => {}} cancelPlan={() => {}} actionPending={false} actionError=""
+        onRecruit={() => {}} onBuildPort={() => {}} onBuyShips={() => {}} onReady={() => {}}
+        onExecuteOperation={() => {}} onEndTurn={() => {}}
+      />,
+    ));
+    expect(container.textContent).toContain('Liman Kur');
+    expect(container.textContent).not.toContain('+1 Gemi');
+    expect(container.textContent).not.toContain('Deniz Nakli');
+
+    await act(async () => root.render(
+      <WarCommandPanel
+        roomData={{ ...navalRoom, mapDefinition: { ...navalRoom.mapDefinition, navalPolicy: 'disabled' } }} me={me} currentPlayer={me} isMyTurn selectedRegion={coastalRegions.a}
+        selectedClaim={navalRoom.claims.a} selectedOwner={me} plan={{ mode: 'idle', operation: null, routeType: 'land', sourceId: null, targetId: null, amount: 1000 }}
+        setPlan={() => {}} beginPlan={() => {}} cancelPlan={() => {}} actionPending={false} actionError=""
+        onRecruit={() => {}} onBuildPort={() => {}} onBuyShips={() => {}} onReady={() => {}}
+        onExecuteOperation={() => {}} onEndTurn={() => {}}
+      />,
+    ));
+    expect(container.textContent).not.toContain('Liman Kur');
+    expect(container.textContent).not.toContain('Gemi');
+    expect(container.textContent).not.toContain('Deniz Nakli');
+    expect(container.textContent).not.toContain('Deniz Saldırısı');
+  });
 });

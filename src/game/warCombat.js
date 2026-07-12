@@ -1,7 +1,8 @@
 import { calculateIncome } from './economy';
 import { PHASES } from './phases';
 import { getLandTransferEligibility, getNavalTransferEligibility } from './warMovement';
-import { isSoldierAmount, requiredShips } from './warConstants';
+import { isSoldierAmount } from './warConstants';
+import { getNavalTargetEligibility } from './navalPolicy';
 
 export function resolveDeterministicCombat(attacking, defending) {
   if (!isSoldierAmount(attacking) || !Number.isSafeInteger(defending) || defending < 0) return null;
@@ -38,14 +39,7 @@ export function getLandAttackEligibility(room, playerId, sourceId, targetId, amo
 }
 
 export function getNavalAttackEligibility(room, playerId, sourceId, targetId, amount) {
-  const base = attackBase(room, playerId, sourceId, targetId, amount);
-  if (!base.legal) return base;
-  if (!base.sourceRegion?.coastal || !base.targetRegion?.coastal) return { legal: false, code: 'NOT_COASTAL', reason: 'Deniz saldırısı kıyı bölgeleri arasında yapılır.' };
-  if (!base.sourceClaim.hasPort) return { legal: false, code: 'PORT_REQUIRED', reason: 'Kaynak bölgede liman yok.' };
-  if (!base.sourceRegion.seaNeighbors?.includes(targetId)) return { legal: false, code: 'NO_SEA_ROUTE', reason: 'Hedefe doğrudan deniz rotası yok.' };
-  const shipsNeeded = requiredShips(amount);
-  if ((base.sourceClaim.ships || 0) < shipsNeeded) return { legal: false, code: 'INSUFFICIENT_SHIPS', reason: `${shipsNeeded} gemi kapasitesi gerekli.` };
-  return { ...base, shipsNeeded };
+  return getNavalTargetEligibility(room, playerId, 'attack', sourceId, targetId, amount);
 }
 
 export function applyAttack(room, playerId, sourceId, targetId, amount, type) {

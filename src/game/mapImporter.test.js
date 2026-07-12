@@ -197,6 +197,12 @@ describe('SVG map importer', () => {
     expect(validatePreparedMapRecord(stale, { allowOutdatedAnalysis: true })).toBe(stale);
   });
 
+  it('rejects unknown future local editor schemas instead of silently downgrading them', async () => {
+    const prepared = await prepareSvgMap('<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><circle id="island" data-terrain="land" cx="10" cy="10" r="8"/></svg>');
+    const future = { ...prepared, terrainDocument: { ...prepared.terrainDocument, editorSchemaVersion: 99 } };
+    expect(() => validatePreparedMapRecord(future, { allowOutdatedAnalysis: true })).toThrow('şema sürümü');
+  });
+
   it('rejects invalid embedded editor metadata instead of silently analyzing a new mapId', async () => {
     const invalid = '<svg viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><metadata id="age-of-paper-map">{"schemaVersion":1}</metadata><rect id="land_a" width="10" height="10"/></svg>';
     await expect(prepareSvgMap(invalid)).rejects.toMatchObject({ code: 'INVALID_EDITOR_METADATA' });

@@ -76,6 +76,42 @@ service cloud.firestore {
         && request.resource.data.lastAction.at is timestamp;
     }
 
+    function validNavalPolicyValue(value) {
+      return value == 'all_coasts' || value == 'selected_routes' || value == 'disabled';
+    }
+
+    function currentNavalPolicy() {
+      return resource.data.mapDefinition.get('navalPolicy', 'selected_routes');
+    }
+
+    function validCoastalLand(region) {
+      return region.coastal == true
+        && ['ocean', 'lake', 'both'].hasAny([region.get('coastType', 'ocean')]);
+    }
+
+    function normalizedRouteKey(firstId, secondId) {
+      return firstId < secondId ? firstId + '::' + secondId : secondId + '::' + firstId;
+    }
+
+    function policyAllowsRoute(firstId, secondId) {
+      let policy = currentNavalPolicy();
+      let pair = normalizedRouteKey(firstId, secondId);
+      return policy == 'all_coasts'
+        ? !resource.data.mapDefinition.get('blockedRoutes', []).hasAny([pair])
+        : policy == 'selected_routes'
+          && resource.data.mapDefinition.get('allowedRoutes', []).hasAny([pair]);
+    }
+
+    function validNavalConfigShape(mapDefinition) {
+      let allowed = mapDefinition.get('allowedRoutes', []);
+      let blocked = mapDefinition.get('blockedRoutes', []);
+      return validNavalPolicyValue(mapDefinition.get('navalPolicy', 'selected_routes'))
+        && allowed is list && blocked is list
+        && allowed.size() <= 2000 && blocked.size() <= 2000
+        && allowed.toSet().size() == allowed.size()
+        && blocked.toSet().size() == blocked.size();
+    }
+
     function validJoinRequestAction(type, requesterId) {
       return request.resource.data.joinRequestAction is map
         && request.resource.data.joinRequestAction.keys().hasOnly(['type', 'actorId', 'requesterId', 'at'])
@@ -343,6 +379,7 @@ service cloud.firestore {
         && request.resource.data.mapDefinition.version == 1
         && request.resource.data.mapDefinition.regionIds is list
         && request.resource.data.mapDefinition.regionsById is map
+        && validNavalConfigShape(request.resource.data.mapDefinition)
         && request.resource.data.mapValidation is map;
     }
 
@@ -361,7 +398,7 @@ service cloud.firestore {
         && manifest.revision is int && manifest.revision > 0
         && manifest.baseSvgHash is string && manifest.baseSvgHash.size() >= 6 && manifest.baseSvgHash.size() <= 128
         && manifest.metadataHash is string && manifest.metadataHash.size() >= 6 && manifest.metadataHash.size() <= 128
-        && manifest.metadataSchemaVersion == 1
+        && (manifest.metadataSchemaVersion == 1 || manifest.metadataSchemaVersion == 2)
         && manifest.analysisAlgorithmVersion is string
         && manifest.mapDefinitionVersion == 1;
     }
@@ -484,9 +521,47 @@ service cloud.firestore {
         && roomChangesOnly(['mapDefinition', 'mapValidation', 'lastAction'])
         && request.resource.data.mapDefinition.version == 1
         && request.resource.data.mapDefinition.regionIds == resource.data.mapDefinition.regionIds
+        && request.resource.data.mapDefinition.regionsById == resource.data.mapDefinition.regionsById
+        && request.resource.data.mapDefinition.diff(resource.data.mapDefinition).affectedKeys()
+          .hasOnly(['navalPolicy', 'allowedRoutes', 'blockedRoutes'])
         && request.resource.data.mapDefinition.regionsById is map
+        && validNavalConfigShape(request.resource.data.mapDefinition)
         && request.resource.data.mapValidation is map
-        && request.resource.data.mapValidation.valid == true;
+        && request.resource.data.mapValidation.valid == true
+        && validNavalConfigMutation();
+    }
+
+    function validNavalConfigMutation() {
+      let action = request.resource.data.lastAction;
+      let editType = action.editType;
+      let oldMap = resource.data.mapDefinition;
+      let newMap = request.resource.data.mapDefinition;
+      let firstId = action.get('firstId', '');
+      let secondId = action.get('secondId', '');
+      let key = normalizedRouteKey(firstId, secondId);
+      let validEndpoints = firstId != secondId
+        && firstId in oldMap.regionsById && secondId in oldMap.regionsById
+        && validCoastalLand(oldMap.regionsById[firstId]) && validCoastalLand(oldMap.regionsById[secondId]);
+      return editType == 'policy'
+        ? validNavalPolicyValue(action.navalPolicy)
+          && newMap.navalPolicy == action.navalPolicy
+          && newMap.allowedRoutes == oldMap.get('allowedRoutes', [])
+          && newMap.blockedRoutes == oldMap.get('blockedRoutes', [])
+        : editType == 'reset_routes'
+          ? newMap.navalPolicy == oldMap.get('navalPolicy', 'selected_routes')
+            && newMap.allowedRoutes.size() == 0 && newMap.blockedRoutes.size() == 0
+          : editType == 'route'
+            && validEndpoints
+            && newMap.navalPolicy == oldMap.get('navalPolicy', 'selected_routes')
+            && (oldMap.get('navalPolicy', 'selected_routes') == 'all_coasts'
+              ? newMap.allowedRoutes == oldMap.get('allowedRoutes', [])
+                && newMap.blockedRoutes.toSet() == (action.allowed == false
+                  ? oldMap.get('blockedRoutes', []).toSet().union([key].toSet())
+                  : oldMap.get('blockedRoutes', []).toSet().difference([key].toSet()))
+              : newMap.blockedRoutes == oldMap.get('blockedRoutes', [])
+                && newMap.allowedRoutes.toSet() == (action.allowed == false
+                  ? oldMap.get('allowedRoutes', []).toSet().difference([key].toSet())
+                  : oldMap.get('allowedRoutes', []).toSet().union([key].toSet())));
     }
 
     function isMobilizationStart() {
@@ -563,12 +638,15 @@ service cloud.firestore {
           ? newClaim.diff(oldClaim).affectedKeys().hasOnly(['soldiers'])
             && newClaim.soldiers == oldClaim.soldiers + 1000 * count
           : type == 'build_port'
-            ? region.coastal == true
+            ? currentNavalPolicy() != 'disabled'
+              && validCoastalLand(region)
               && region.get('portAllowed', region.coastal) == true
               && oldClaim.hasPort == false
               && newClaim.diff(oldClaim).affectedKeys().hasOnly(['hasPort'])
               && newClaim.hasPort == true
-            : region.coastal == true
+            : currentNavalPolicy() != 'disabled'
+              && validCoastalLand(region)
+              && region.get('portAllowed', region.coastal) == true
               && oldClaim.hasPort == true
               && newClaim.diff(oldClaim).affectedKeys().hasOnly(['ships'])
               && newClaim.ships == oldClaim.ships + count);
@@ -614,10 +692,11 @@ service cloud.firestore {
           && path.size() > 1
           && path[0] == sourceId
           && path[path.size() - 1] == targetId
-        : sourceRegion.coastal == true
-          && targetRegion.coastal == true
-          && sourceRegion.seaNeighbors.hasAny([targetId])
-          && targetRegion.seaNeighbors.hasAny([sourceId])
+        : validCoastalLand(sourceRegion)
+          && validCoastalLand(targetRegion)
+          && (('navalPolicy' in resource.data.mapDefinition)
+            ? policyAllowsRoute(sourceId, targetId)
+            : sourceRegion.seaNeighbors.hasAny([targetId]) && targetRegion.seaNeighbors.hasAny([sourceId]))
           && sourceClaim.hasPort == true
           && sourceClaim.ships * 1000 >= amount;
     }
@@ -628,10 +707,11 @@ service cloud.firestore {
       let sourceClaim = resource.data.claims[sourceId];
       return type == 'land_attack'
         ? sourceRegion.landNeighbors.hasAny([targetId])
-        : sourceRegion.coastal == true
-          && targetRegion.coastal == true
-          && sourceRegion.seaNeighbors.hasAny([targetId])
-          && targetRegion.seaNeighbors.hasAny([sourceId])
+        : validCoastalLand(sourceRegion)
+          && validCoastalLand(targetRegion)
+          && (('navalPolicy' in resource.data.mapDefinition)
+            ? policyAllowsRoute(sourceId, targetId)
+            : sourceRegion.seaNeighbors.hasAny([targetId]) && targetRegion.seaNeighbors.hasAny([sourceId]))
           && sourceClaim.hasPort == true
           && sourceClaim.ships * 1000 >= amount;
     }
@@ -878,13 +958,15 @@ service cloud.firestore {
             'kind', 'schemaVersion', 'hash', 'mapId', 'revision', 'metadata', 'size', 'createdAt', 'createdBy'
           ])
           && request.resource.data.kind == 'metadata'
-          && request.resource.data.schemaVersion == 1
+          && (request.resource.data.schemaVersion == 1 || request.resource.data.schemaVersion == 2)
           && assetId == 'metadata_' + request.resource.data.hash
           && request.resource.data.mapId is string
           && request.resource.data.revision is int && request.resource.data.revision > 0
-          && request.resource.data.metadata is map
+          && ((request.resource.data.schemaVersion == 1 && request.resource.data.metadata is map)
+            || (request.resource.data.schemaVersion == 2 && request.resource.data.metadata is string))
           && request.resource.data.size is int
-          && request.resource.data.size > 0 && request.resource.data.size <= 450000;
+          && request.resource.data.size > 0 && request.resource.data.size <= 450000
+          && (request.resource.data.schemaVersion == 1 || request.resource.data.size == request.resource.data.metadata.size());
       }
 
       allow read: if signedIn() && request.auth.uid in parentRoom().players;

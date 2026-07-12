@@ -5,6 +5,7 @@ import {
   embedMapMetadata,
   extractMapMetadata,
   hashText,
+  migrateMetadataPackage,
   stripEditorMetadata,
   validateMetadataPackage,
 } from './mapMetadata';
@@ -52,5 +53,21 @@ describe('Age of Paper SVG metadata', () => {
     expect(document.getElementById('land_a').getAttribute('data-region')).toBe('true');
     expect(document.getElementById('water_1').hasAttribute('data-region')).toBe(false);
     expect(composed).not.toContain('selection-rectangle');
+  });
+
+  it('migrates schema v1 metadata to the default all-coasts policy', () => {
+    const current = createMetadataPackage(terrainDocument(), { compact: true });
+    const legacy = { ...current, schemaVersion: 1, editorVersion: 1, compatibilityRoutes: [] };
+    delete legacy.navalPolicy;
+    delete legacy.allowedRoutes;
+    delete legacy.blockedRoutes;
+    delete legacy.navigationMask;
+    expect(migrateMetadataPackage(legacy)).toMatchObject({
+      schemaVersion: 2,
+      editorVersion: 2,
+      navalPolicy: 'all_coasts',
+      allowedRoutes: [],
+      blockedRoutes: [],
+    });
   });
 });

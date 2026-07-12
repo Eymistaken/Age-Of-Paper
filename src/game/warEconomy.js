@@ -7,13 +7,20 @@ import {
   SOLDIER_COST,
   isPositiveInteger,
 } from './warConstants';
+import { NAVAL_POLICIES, isFinalCoastalLand, normalizeNavalConfig } from './navalPolicy';
 
 export function isWarTurnPhase(phase) {
   return phase === PHASES.MOBILIZATION || phase === PHASES.WAR;
 }
 
-export function canBuildPort(region) {
-  return region?.coastal === true && (region.portAllowed === undefined || region.portAllowed === true);
+export function canBuildPort(region, mapDefinition) {
+  const policy = normalizeNavalConfig(mapDefinition, {
+    mapDefinition,
+    defaultPolicy: NAVAL_POLICIES.SELECTED_ROUTES,
+  }).navalPolicy;
+  return policy !== NAVAL_POLICIES.DISABLED
+    && isFinalCoastalLand(region)
+    && (region.portAllowed === undefined || region.portAllowed === true);
 }
 
 export function grantTurnIncome(room, playerId = room?.turnOrder?.[room?.turnIndex]) {
@@ -63,20 +70,27 @@ function purchase(room, playerId, regionId, kind, count) {
   if (!Number.isSafeInteger(cost) || safeMoney(base.player.money) < cost) {
     return { room, eligibility: { legal: false, code: 'INSUFFICIENT_FUNDS', reason: 'Hazinede yeterli altın yok.' } };
   }
-  if (kind === 'port' && (!canBuildPort(base.region) || base.claim.hasPort)) {
+  const policy = normalizeNavalConfig(paid.mapDefinition, {
+    mapDefinition: paid.mapDefinition,
+    defaultPolicy: NAVAL_POLICIES.SELECTED_ROUTES,
+  }).navalPolicy;
+  if ((kind === 'port' || kind === 'ships') && policy === NAVAL_POLICIES.DISABLED) {
+    return { room, eligibility: { legal: false, code: 'NAVAL_DISABLED', reason: 'Deniz politikası kapalı.' } };
+  }
+  if (kind === 'port' && (!canBuildPort(base.region, paid.mapDefinition) || base.claim.hasPort)) {
     const code = base.claim.hasPort
       ? 'HAS_PORT'
-      : base.region.coastal
+      : isFinalCoastalLand(base.region)
         ? 'PORT_NOT_ALLOWED'
         : 'NOT_COASTAL';
     const reason = base.claim.hasPort
       ? 'Bu bölgede zaten liman var.'
-      : base.region.coastal
+      : isFinalCoastalLand(base.region)
         ? 'Bu kıyı bölgesinde liman kurulmasına harita hazırlığında izin verilmemiş.'
         : 'Liman yalnızca kıyı bölgesine kurulabilir.';
     return { room, eligibility: { legal: false, code, reason } };
   }
-  if (kind === 'ships' && (!base.region.coastal || !base.claim.hasPort)) {
+  if (kind === 'ships' && (!isFinalCoastalLand(base.region) || base.region.portAllowed === false || !base.claim.hasPort)) {
     return { room, eligibility: { legal: false, code: 'PORT_REQUIRED', reason: 'Gemi satın almak için kıyı bölgesinde liman gerekir.' } };
   }
   const claim = {

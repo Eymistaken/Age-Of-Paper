@@ -40,7 +40,7 @@ async function renderEditor(overrides = {}) {
   const onApply = overrides.onApply || vi.fn();
   const onDraftChange = overrides.onDraftChange;
   await act(async () => {
-    root.render(<TerrainMapEditor initialRecord={prepared} repository={repository} onApply={onApply} onClose={onClose} onDraftChange={onDraftChange} />);
+    root.render(<TerrainMapEditor initialRecord={prepared} repository={repository} onApply={onApply} onClose={onClose} onDraftChange={onDraftChange} readOnly={overrides.readOnly || false} />);
   });
   return { onApply, onClose };
 }
@@ -60,6 +60,20 @@ async function settlePromises() {
 }
 
 describe('terrain map editor workspace', () => {
+  it('opens non-host room maps read-only with naval settings visible', async () => {
+    const save = vi.spyOn(repository, 'savePreparedMap');
+    const { onApply } = await renderEditor({ readOnly: true });
+    expect(document.body.textContent).toContain('Salt okunur oda haritası');
+    expect(document.body.textContent).not.toContain('Odaya Uygula');
+    expect(document.querySelector('[aria-label="Harita görünen adı"]').readOnly).toBe(true);
+    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Ayarlar').click());
+    expect(document.querySelector('.aop-editor-inspector-wrap').classList.contains('is-open')).toBe(true);
+    await act(async () => [...document.querySelectorAll('[role="tab"]')].find((button) => button.textContent === 'Deniz Erişimi').click());
+    expect(document.body.textContent).toContain('Salt okunur görünüm');
+    expect(document.querySelector('[aria-label="Deniz politikası"]').disabled).toBe(true);
+    expect(save).not.toHaveBeenCalled();
+    expect(onApply).not.toHaveBeenCalled();
+  });
   it('traps the page in an accessible full-screen dialog and restores overflow', async () => {
     document.body.style.overflow = 'clip';
     await renderEditor();
@@ -203,8 +217,10 @@ describe('terrain map editor workspace', () => {
     const onApply = vi.fn(async () => {});
     await renderEditor({ onApply });
     expect(onApply).not.toHaveBeenCalled();
-    await act(async () => { [...document.querySelectorAll('button')].find((button) => button.textContent === 'Odaya Uygula').click(); await settlePromises(); });
-    expect(onApply).toHaveBeenCalledOnce();
+    await act(async () => {
+      [...document.querySelectorAll('button')].find((button) => button.textContent === 'Odaya Uygula').click();
+      await vi.waitFor(() => expect(onApply).toHaveBeenCalledOnce(), { timeout: 1_000, interval: 1 });
+    });
   });
 
   it('repairs a previous-version draft from originalSvg while preserving its stable identity', async () => {

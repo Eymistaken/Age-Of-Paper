@@ -1,3 +1,5 @@
+import { NAVAL_POLICIES, normalizeNavalConfig } from './navalPolicy';
+
 function byId(mapDefinition) {
   return mapDefinition?.regionsById || Object.fromEntries(
     (mapDefinition?.regions || []).map((region) => [region.id, region]),
@@ -17,14 +19,28 @@ export function normalizeNavalRegions(mapDefinition) {
       seaNeighbors: uniqueSorted(region.seaNeighbors),
     };
   });
-  return {
+  const normalized = {
     ...mapDefinition,
     regions,
     regionsById: Object.fromEntries(regions.map((region) => [region.id, region])),
   };
+  return {
+    ...normalized,
+    ...normalizeNavalConfig(mapDefinition, {
+      mapDefinition: normalized,
+      defaultPolicy: NAVAL_POLICIES.SELECTED_ROUTES,
+    }),
+  };
 }
 
 export function listNavalRoutes(mapDefinition) {
+  const explicit = normalizeNavalConfig(mapDefinition, {
+    mapDefinition,
+    defaultPolicy: NAVAL_POLICIES.SELECTED_ROUTES,
+  });
+  if (mapDefinition?.navalPolicy !== undefined || mapDefinition?.allowedRoutes !== undefined) {
+    return explicit.navalPolicy === NAVAL_POLICIES.SELECTED_ROUTES ? explicit.allowedRoutes : [];
+  }
   const regions = byId(mapDefinition);
   const routes = [];
   for (const id of mapDefinition?.regionIds || []) {
@@ -64,6 +80,9 @@ function validateRouteEndpoints(mapDefinition, firstId, secondId) {
   if (!normalized.regionsById[firstId] || !normalized.regionsById[secondId]) {
     return { ok: false, code: 'UNKNOWN_REGION', reason: 'Rota bölgesi haritada bulunmuyor.' };
   }
+  if (!normalized.regionsById[firstId].coastal || !normalized.regionsById[secondId].coastal) {
+    return { ok: false, code: 'NON_COASTAL_ROUTE', reason: 'Rota uçları terrain analizinde kıyı olmalı.' };
+  }
   return { ok: true, normalized };
 }
 
@@ -76,22 +95,19 @@ export function createNavalRoute(mapDefinition, firstId, secondId) {
   if (alreadyConnected) {
     return { ok: false, code: 'DUPLICATE_ROUTE', reason: 'Bu iki bölge arasında zaten bir deniz rotası var.' };
   }
-  const autoMarkedRegionIds = [firstId, secondId]
-    .filter((regionId) => !normalized.regionsById[regionId].coastal);
   const regions = normalized.regions.map((region) => {
     if (region.id !== firstId && region.id !== secondId) return region;
     const otherId = region.id === firstId ? secondId : firstId;
     return {
       ...region,
-      coastal: true,
       seaNeighbors: uniqueSorted([...region.seaNeighbors, otherId]),
     };
   });
   return {
     ok: true,
     mapDefinition: { ...normalized, regions, regionsById: Object.fromEntries(regions.map((region) => [region.id, region])) },
-    autoMarkedCoastal: autoMarkedRegionIds.length > 0,
-    autoMarkedRegionIds,
+    autoMarkedCoastal: false,
+    autoMarkedRegionIds: [],
   };
 }
 

@@ -26,7 +26,9 @@ function lobbyRoom() {
     name: id.toUpperCase(),
     price: 5000,
     income: 500,
-    coastal: false,
+    coastal: true,
+    coastType: id === 'a' ? 'ocean' : 'lake',
+    portAllowed: true,
     seaNeighbors: [],
     landNeighbors: [id === 'a' ? 'b' : 'a'],
     claimNeighbors: [id === 'a' ? 'b' : 'a'],
@@ -47,6 +49,9 @@ function lobbyRoom() {
       regionIds: ['a', 'b'],
       regions,
       regionsById: Object.fromEntries(regions.map((region) => [region.id, region])),
+      navalPolicy: 'selected_routes',
+      allowedRoutes: [],
+      blockedRoutes: [],
     },
   };
 }
@@ -128,30 +133,25 @@ describe('startGame map compatibility', () => {
   });
 });
 
-describe('configureNavalMap atomic route transaction', () => {
-  it('writes both coastal flags and both route edges in one transaction update', async () => {
+describe('configureNavalMap atomic policy transaction', () => {
+  it('writes a normalized selected route without changing terrain-derived coasts', async () => {
     const result = await configureNavalMap('ABCD', 'host', {
-      type: 'create_route', firstId: 'a', secondId: 'b',
+      type: 'route', firstId: 'b', secondId: 'a', allowed: true,
     });
-    expect(result).toMatchObject({ ok: true, autoMarkedRegionIds: ['a', 'b'] });
+    expect(result).toMatchObject({ ok: true });
     expect(firestore.runTransaction).toHaveBeenCalledOnce();
     expect(firestore.update).toHaveBeenCalledOnce();
     const [, update] = firestore.update.mock.calls[0];
-    expect(update.mapDefinition.regionsById.a).toMatchObject({ coastal: true, seaNeighbors: ['b'] });
-    expect(update.mapDefinition.regionsById.b).toMatchObject({ coastal: true, seaNeighbors: ['a'] });
-    expect(update.lastAction).toMatchObject({ type: 'naval_config', editType: 'create_route', connected: true });
+    expect(update.mapDefinition.allowedRoutes).toEqual(['a::b']);
+    expect(update.mapDefinition.regionsById).toEqual(firestore.room.mapDefinition.regionsById);
+    expect(update.lastAction).toMatchObject({ type: 'naval_config', editType: 'route', allowed: true });
   });
 
-  it('does not write when the requested route already exists', async () => {
-    firestore.room.mapDefinition.regionsById.a = firestore.room.mapDefinition.regions[0] = {
-      ...firestore.room.mapDefinition.regionsById.a, coastal: true, seaNeighbors: ['b'],
-    };
-    firestore.room.mapDefinition.regionsById.b = firestore.room.mapDefinition.regions[1] = {
-      ...firestore.room.mapDefinition.regionsById.b, coastal: true, seaNeighbors: ['a'],
-    };
+  it('does not write when a route endpoint is not a final coast', async () => {
+    firestore.room.mapDefinition.regionsById.b = { ...firestore.room.mapDefinition.regionsById.b, coastal: false, coastType: 'none' };
     await expect(configureNavalMap('ABCD', 'host', {
-      type: 'create_route', firstId: 'a', secondId: 'b',
-    })).rejects.toMatchObject({ code: 'DUPLICATE_ROUTE' });
+      type: 'route', firstId: 'a', secondId: 'b', allowed: true,
+    })).rejects.toMatchObject({ code: 'INVALID_ROUTE_ENDPOINT' });
     expect(firestore.update).not.toHaveBeenCalled();
   });
 });

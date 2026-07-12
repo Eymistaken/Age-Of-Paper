@@ -61,6 +61,8 @@ describe('terrain document derivation', () => {
       ],
     });
     const map = buildCompatibilityMapDefinition(derived);
+    expect(derived.navalPolicy).toBe('selected_routes');
+    expect(map.allowedRoutes).toEqual(['a::b']);
     expect(map.regionIds).toEqual(['a', 'b']);
     expect(map.regionsById.a).toMatchObject({ coastal: true, portAllowed: true, seaNeighbors: ['b'] });
     expect(map.regionsById.b.claimNeighbors).toEqual(['a']);

@@ -257,6 +257,7 @@ export const MobileGameRoom = ({
         className="aop-mobile-map"
         highlightSourceIds={warHighlights?.sources || []}
         highlightTargetIds={warHighlights?.targets || []}
+        highlightInvalidTargetIds={warHighlights?.invalidTargets || []}
         showNavalRoutes={roomData.phase === PHASES.WAR && warPlan?.routeType === 'naval' && warPlan?.mode !== 'idle'}
       />
 

@@ -2,6 +2,7 @@ import { PHASES } from '../game/phases';
 import { resolveDeterministicCombat } from '../game/warCombat';
 import { SOLDIER_BATCH } from '../game/warConstants';
 import { getWarPlanEligibility, WAR_INTERACTION_MODES } from '../game/warUiState';
+import { getPlayerNavalCapability, isFinalCoastalLand } from '../game/navalPolicy';
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString('tr-TR');
@@ -43,6 +44,8 @@ export function WarCommandPanel({
   const selecting = plan.mode !== WAR_INTERACTION_MODES.IDLE;
   const ownedSelection = selectedClaim?.ownerId === me.id;
   const regionMax = sourceClaim?.soldiers || selectedClaim?.soldiers || SOLDIER_BATCH;
+  const navalCapability = getPlayerNavalCapability(roomData, me.id);
+  const selectedEligibleCoast = isFinalCoastalLand(selectedRegion) && selectedRegion?.portAllowed !== false;
 
   return (
     <section className={`aop-war-orders ${compact ? 'is-compact' : ''}`}>
@@ -55,16 +58,23 @@ export function WarCommandPanel({
           <dl className="aop-war-facts">
             <div><dt>Sahibi</dt><dd>{selectedOwner?.name || 'Tarafsız'}</dd></div>
             <div><dt>Asker</dt><dd>{formatNumber(selectedClaim?.soldiers)}</dd></div>
-            <div><dt>Kıyı</dt><dd>{selectedRegion.coastal ? 'Evet' : 'Hayır'}</dd></div>
-            <div><dt>Liman</dt><dd>{selectedClaim?.hasPort ? 'Var' : 'Yok'}</dd></div>
-            <div><dt>Gemi</dt><dd>{formatNumber(selectedClaim?.ships)}</dd></div>
+            {navalCapability.showNavalSection && <div><dt>Kıyı</dt><dd>{isFinalCoastalLand(selectedRegion) ? 'Evet' : 'Hayır'}</dd></div>}
+            {navalCapability.showNavalSection && <div><dt>Liman</dt><dd>{selectedClaim?.hasPort ? 'Var' : 'Yok'}</dd></div>}
+            {navalCapability.showNavalSection && navalCapability.hasPort && <div><dt>Gemi</dt><dd>{formatNumber(selectedClaim?.ships)}</dd></div>}
             <div><dt>Gelir</dt><dd>+{formatNumber(selectedRegion.income)}</dd></div>
           </dl>
           {logistics && (
             <div className="aop-logistics-actions" aria-label="Lojistik emirleri">
               <button disabled={!canCommand || !ownedSelection || actionPending} onClick={onRecruit} title={!ownedSelection ? 'Asker yalnızca kendi bölgen için alınabilir.' : ''}>+1K Asker<br/><small>10.000 altın</small></button>
-              <button disabled={!canCommand || !ownedSelection || !selectedRegion.coastal || selectedClaim?.hasPort || actionPending} onClick={onBuildPort} title={!selectedRegion.coastal ? 'Bölge kıyı değil.' : selectedClaim?.hasPort ? 'Liman zaten var.' : ''}>Liman Kur<br/><small>30.000 altın</small></button>
-              <button disabled={!canCommand || !ownedSelection || !selectedClaim?.hasPort || actionPending} onClick={onBuyShips} title={!selectedClaim?.hasPort ? 'Önce liman gerekir.' : ''}>+1 Gemi<br/><small>20.000 altın</small></button>
+              {navalCapability.showNavalSection && !navalCapability.hasPort && selectedEligibleCoast && (
+                <button disabled={!canCommand || !ownedSelection || selectedClaim?.hasPort || actionPending} onClick={onBuildPort}>Liman Kur<br/><small>30.000 altın</small></button>
+              )}
+              {navalCapability.showNavalSection && navalCapability.hasPort && selectedEligibleCoast && !selectedClaim?.hasPort && (
+                <button disabled={!canCommand || !ownedSelection || actionPending} onClick={onBuildPort}>Liman Kur<br/><small>30.000 altın</small></button>
+              )}
+              {navalCapability.showNavalSection && navalCapability.hasPort && selectedClaim?.hasPort && (
+                <button disabled={!canCommand || !ownedSelection || actionPending} onClick={onBuyShips}>+1 Gemi<br/><small>20.000 altın</small></button>
+              )}
             </div>
           )}
         </>
@@ -74,9 +84,9 @@ export function WarCommandPanel({
         <>
           <div className="aop-operation-picker" aria-label="Harekât seçimi">
             <button disabled={!canCommand || actionPending} onClick={() => beginPlan('move', 'land')}>Kara Nakli</button>
-            <button disabled={!canCommand || actionPending} onClick={() => beginPlan('move', 'naval')}>Deniz Nakli</button>
+            {navalCapability.showNavalSection && navalCapability.hasPort && <button disabled={!canCommand || actionPending} onClick={() => beginPlan('move', 'naval')}>Deniz Nakli</button>}
             <button disabled={!canCommand || actionPending} onClick={() => beginPlan('attack', 'land')}>Kara Saldırısı</button>
-            <button disabled={!canCommand || actionPending} onClick={() => beginPlan('attack', 'naval')}>Deniz Saldırısı</button>
+            {navalCapability.showNavalSection && navalCapability.hasPort && <button disabled={!canCommand || actionPending} onClick={() => beginPlan('attack', 'naval')}>Deniz Saldırısı</button>}
           </div>
           {selecting && (
             <div className="aop-operation-draft">

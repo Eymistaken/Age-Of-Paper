@@ -30,8 +30,9 @@ export async function buildRoomMapAssets(preparedMap) {
   const metadata = preparedMap.compactMetadata;
   const metadataValidation = validateMetadataPackage(metadata);
   if (!metadataValidation.valid) throw new Error(metadataValidation.errors[0].message);
-  const metadataHash = await hashText(canonicalJson(metadata));
-  const metadataSize = canonicalJson(metadata).length;
+  const metadataJson = canonicalJson(metadata);
+  const metadataHash = await hashText(metadataJson);
+  const metadataSize = metadataJson.length;
   if (metadataSize > 450_000) throw new Error('Kompakt metadata room asset sınırını aşıyor.');
   if (preparedMap.metadataHash && preparedMap.metadataHash !== metadataHash) {
     throw new Error('Kompakt metadata hash doğrulaması başarısız.');
@@ -61,7 +62,7 @@ export async function buildRoomMapAssets(preparedMap) {
       hash: metadataHash,
       mapId: preparedMap.mapId,
       revision: preparedMap.revision,
-      metadata,
+      metadata: metadataJson,
       size: metadataSize,
     },
   };
@@ -73,13 +74,19 @@ async function verifyAssets(manifest, baseAsset, metadataAsset) {
     throw new Error('Harita asset kimliği manifest ile eşleşmiyor.');
   }
   if (await hashText(baseAsset.svg) !== manifest.baseSvgHash) throw new Error('Temel SVG asset hash değeri uyuşmuyor.');
-  if (await hashText(canonicalJson(metadataAsset.metadata)) !== manifest.metadataHash) throw new Error('Metadata asset hash değeri uyuşmuyor.');
+  let metadata;
+  try {
+    metadata = typeof metadataAsset.metadata === 'string' ? JSON.parse(metadataAsset.metadata) : metadataAsset.metadata;
+  } catch {
+    throw new Error('Metadata asset JSON kaydı okunamadı.');
+  }
+  if (await hashText(canonicalJson(metadata)) !== manifest.metadataHash) throw new Error('Metadata asset hash değeri uyuşmuyor.');
   if (metadataAsset.mapId !== manifest.mapId || metadataAsset.revision !== manifest.revision) {
     throw new Error('Metadata revision veya mapId değeri uyuşmuyor.');
   }
-  const validation = validateMetadataPackage(metadataAsset.metadata);
+  const validation = validateMetadataPackage(metadata);
   if (!validation.valid) throw new Error(validation.errors[0].message);
-  return applyCompactMetadataToSvg(baseAsset.svg, metadataAsset.metadata);
+  return { svg: applyCompactMetadataToSvg(baseAsset.svg, metadata), metadata };
 }
 
 async function fullFetch(manifest, fetchAsset) {
@@ -98,14 +105,18 @@ export async function resolveRoomMapAssets({ manifest, repository, fetchAsset })
   try {
     if (decision === 'full') ({ baseAsset, metadataAsset } = await fullFetch(manifest, fetchAsset));
     else if (decision === 'metadata') metadataAsset = await fetchAsset('metadata', manifest.metadataHash);
-    const svg = await verifyAssets(manifest, baseAsset, metadataAsset);
+    const verified = await verifyAssets(manifest, baseAsset, metadataAsset);
+    const svg = verified.svg;
+    metadataAsset = { ...metadataAsset, metadata: verified.metadata };
     await repository.putMapAsset('base', manifest.baseSvgHash, baseAsset);
     await repository.putMapAsset('metadata', manifest.metadataHash, metadataAsset);
     return { manifest, baseAsset, metadataAsset, svg, cacheDecision: decision };
   } catch (error) {
     if (decision === 'full') throw error;
     ({ baseAsset, metadataAsset } = await fullFetch(manifest, fetchAsset));
-    const svg = await verifyAssets(manifest, baseAsset, metadataAsset);
+    const verified = await verifyAssets(manifest, baseAsset, metadataAsset);
+    const svg = verified.svg;
+    metadataAsset = { ...metadataAsset, metadata: verified.metadata };
     await repository.putMapAsset('base', manifest.baseSvgHash, baseAsset);
     await repository.putMapAsset('metadata', manifest.metadataHash, metadataAsset);
     return { manifest, baseAsset, metadataAsset, svg, cacheDecision: 'full_fallback' };
@@ -125,6 +136,7 @@ export async function archiveResolvedRoomMap(repository, resolved, mapDefinition
     preparedSvg: embedMapMetadata(resolved.svg, metadata),
     thumbnail: resolved.svg,
     compactMetadata: metadata,
+    terrainDocument: null,
     mapDefinition,
     validation: mapValidation,
     sourceLabel: `Oda ${roomCode}`,

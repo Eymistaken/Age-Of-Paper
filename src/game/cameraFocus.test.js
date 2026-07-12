@@ -36,11 +36,13 @@ describe('camera focus event selection', () => {
     expect(reduceFocusAction(state, oldAction, 'me').effect).toBeNull();
   });
 
-  it('focuses only meaningful remote movement and attack targets', () => {
-    const attack = action({ type: 'naval_attack', regionId: undefined, targetId: 'target_b', actionId: '8:naval_attack:other:target_b' });
+  it('focuses land operations while naval actions wait for their ship presentation', () => {
+    const attack = action({ type: 'land_attack', regionId: undefined, targetId: 'target_b', actionId: '8:land_attack:other:target_b' });
     expect(reduceFocusAction(createFocusState(null), attack, 'me').effect).toEqual({
       type: 'remote_operation', actionId: attack.actionId, regionId: 'target_b',
     });
+    const naval = action({ type: 'naval_attack', regionId: undefined, targetId: 'target_b', actionId: '8:naval_attack:other:target_b' });
+    expect(reduceFocusAction(createFocusState(null), naval, 'me').effect).toBeNull();
     const purchase = action({ type: 'buy_ships', regionId: 'source_a', actionId: '8:buy_ships:other:source_a' });
     expect(reduceFocusAction(createFocusState(null), purchase, 'me').effect).toBeNull();
   });

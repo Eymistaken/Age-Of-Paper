@@ -5,6 +5,7 @@ import { createHistory, executeCommand, redo, undo } from '../game/editorHistory
 import { prepareSvgMap, rebuildPreparedMap } from '../game/mapImporter';
 import { ANALYSIS_ALGORITHM_VERSION, buildCompatibilityMapDefinition, deriveTerrainDocument } from '../game/terrainModel';
 import { validateMapDefinition } from '../game/mapValidation';
+import { NAVAL_POLICIES, navalRouteKey, normalizeRoutePair } from '../game/navalPolicy';
 import { TerrainInspector } from './TerrainInspector';
 import { TerrainMapCanvas } from './TerrainMapCanvas';
 
@@ -30,7 +31,7 @@ function sameSelection(first, second) {
   return first.length === second.length && first.every((id, index) => id === second[index]);
 }
 
-export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, onDraftChange }) {
+export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, onDraftChange, readOnly = false }) {
   const titleId = useId();
   const descriptionId = useId();
   const dialogRef = useRef(null);
@@ -64,6 +65,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorSection, setInspectorSection] = useState('terrain');
   const [classificationFocusRequest, setClassificationFocusRequest] = useState(0);
+  const [navalSourceId, setNavalSourceId] = useState(null);
   const [displayName, setDisplayName] = useState(initialRecord.displayName);
   const editorDocument = history.present;
   const previewDocument = batchPreview?.document || editorDocument;
@@ -89,6 +91,11 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
   useEffect(() => setDisplayName(editorDocument.displayName || record.displayName), [editorDocument.displayName, record.displayName]);
 
   useEffect(() => {
+    const source = editorDocument.surfacesById[navalSourceId];
+    if (navalSourceId && (!source || source.terrainType !== 'land' || source.coastType === 'none')) setNavalSourceId(null);
+  }, [editorDocument, navalSourceId]);
+
+  useEffect(() => {
     if (!analysisIsCurrent) setFeedback('Bu taslak önceki analiz sürümünü kullanıyor. Odaya uygulamadan önce “Analizi Sıfırla” ile yeniden analiz et.');
   }, [analysisIsCurrent]);
 
@@ -102,6 +109,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
   }, [previewDocument, record, viewMode]);
 
   const flushDraft = useCallback(async () => {
+    if (readOnly) return latestRecordRef.current;
     window.clearTimeout(saveTimerRef.current);
     if (savePromiseRef.current) {
       try { await savePromiseRef.current; } catch { /* A newer retry may follow a failed write. */ }
@@ -144,9 +152,10 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
         saveTargetRef.current = null;
       }
     }
-  }, [repository]);
+  }, [readOnly, repository]);
 
   useEffect(() => {
+    if (readOnly) return undefined;
     window.clearTimeout(saveTimerRef.current);
     if (history.present === lastSavedDocumentRef.current && !savePromiseRef.current) {
       localDirtyRef.current = false;
@@ -157,9 +166,10 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
     setSaveStatus('Kaydedilmemiş değişiklikler');
     saveTimerRef.current = window.setTimeout(() => flushDraft().catch(() => {}), 650);
     return () => window.clearTimeout(saveTimerRef.current);
-  }, [flushDraft, history.present]);
+  }, [flushDraft, history.present, readOnly]);
 
   const handleUndo = useCallback(() => {
+    if (readOnly) return;
     const next = undo(historyRef.current);
     latestDocumentRef.current = next.present;
     localDirtyRef.current = next.present !== lastSavedDocumentRef.current;
@@ -170,9 +180,10 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
     }
     setHistory(next);
     setDirtyRoom(true);
-  }, []);
+  }, [readOnly]);
 
   const handleRedo = useCallback(() => {
+    if (readOnly) return;
     const next = redo(historyRef.current);
     latestDocumentRef.current = next.present;
     localDirtyRef.current = next.present !== lastSavedDocumentRef.current;
@@ -183,9 +194,10 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
     }
     setHistory(next);
     setDirtyRoom(true);
-  }, []);
+  }, [readOnly]);
 
   const commitDocument = useCallback((next, label) => {
+    if (readOnly) return;
     const nextDoc = deriveTerrainDocument(next);
     latestDocumentRef.current = nextDoc;
     localDirtyRef.current = nextDoc !== lastSavedDocumentRef.current;
@@ -198,7 +210,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
     setDirtyRoom(true);
     setBoundaryPreview(null);
     setBatchPreview(null);
-  }, []);
+  }, [readOnly]);
 
   const changeSelection = useCallback((nextIds) => {
     const normalized = [...new Set(nextIds || [])];
@@ -227,6 +239,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
 
   const requestClose = useCallback(async () => {
     if (pending) return;
+    if (readOnly) { onClose(); return; }
     window.clearTimeout(saveTimerRef.current);
     if (localDirtyRef.current || savePromiseRef.current) {
       try { await flushDraft(); } catch {
@@ -236,7 +249,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
     }
     if (dirtyRoom && !window.confirm('Yerel taslak kaydedildi ancak odaya uygulanmadı. Editörü kapatmak istiyor musun?')) return;
     onClose();
-  }, [dirtyRoom, flushDraft, onClose, pending]);
+  }, [dirtyRoom, flushDraft, onClose, pending, readOnly]);
 
   useEffect(() => {
     const returnFocus = document.activeElement;
@@ -294,12 +307,12 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
         requestClose();
         return;
       }
-      if (event.ctrlKey && event.key.toLowerCase() === 'z') {
+      if (!readOnly && event.ctrlKey && event.key.toLowerCase() === 'z') {
         event.preventDefault();
         handleUndo();
         return;
       }
-      if (event.ctrlKey && event.key.toLowerCase() === 'y') {
+      if (!readOnly && event.ctrlKey && event.key.toLowerCase() === 'y') {
         event.preventDefault();
         handleRedo();
         return;
@@ -319,7 +332,7 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
       document.removeEventListener('keydown', onKeyDown, true);
       document.removeEventListener('keyup', onKeyUp, true);
     };
-  }, [cancelTopOperation, changeSelection, handleRedo, handleUndo, requestClose, selectedIds.length]);
+  }, [cancelTopOperation, changeSelection, handleRedo, handleUndo, readOnly, requestClose, selectedIds.length]);
 
   const classifySelection = (terrainType) => commitDocument({
     ...editorDocument,
@@ -341,6 +354,33 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
       ? { ...surface, portPreference: allowed }
       : surface),
   }, allowed ? 'Liman iznini aç' : 'Liman iznini kapat');
+
+  const changeNavalPolicy = (navalPolicy) => {
+    if (!Object.values(NAVAL_POLICIES).includes(navalPolicy)) return;
+    commitDocument({ ...editorDocument, navalPolicy }, `Deniz politikasını ${navalPolicy} yap`);
+  };
+
+  const toggleNavalRoute = (firstId, secondId, currentlyAllowed) => {
+    const pair = normalizeRoutePair(firstId, secondId);
+    if (!pair) return;
+    const key = navalRouteKey(pair);
+    if (editorDocument.navalPolicy === NAVAL_POLICIES.ALL_COASTS) {
+      const blockedRoutes = currentlyAllowed
+        ? [...(editorDocument.blockedRoutes || []), pair]
+        : (editorDocument.blockedRoutes || []).filter((route) => navalRouteKey(route) !== key);
+      commitDocument({ ...editorDocument, blockedRoutes }, currentlyAllowed ? 'Deniz rotasını engelle' : 'Deniz rotası engelini kaldır');
+      return;
+    }
+    const allowedRoutes = currentlyAllowed
+      ? (editorDocument.allowedRoutes || []).filter((route) => navalRouteKey(route) !== key)
+      : [...(editorDocument.allowedRoutes || []), pair];
+    commitDocument({ ...editorDocument, allowedRoutes }, currentlyAllowed ? 'Özel deniz rotasını kaldır' : 'Özel deniz rotasına izin ver');
+  };
+
+  const resetNavalRoutes = () => {
+    if (!window.confirm('İzin verilen ve engellenen bütün rota ayarları sıfırlansın mı? Politika modu korunacak.')) return;
+    commitDocument({ ...editorDocument, allowedRoutes: [], blockedRoutes: [] }, 'Rota ayarlarını sıfırla');
+  };
 
   const analyzeBoundary = useCallback(() => {
     setInspectorSection('terrain');
@@ -419,6 +459,9 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
         ...fresh.terrainDocument,
         mapId: currentRecord.mapId,
         revision: editorDocument.revision,
+        navalPolicy: editorDocument.navalPolicy,
+        allowedRoutes: editorDocument.allowedRoutes,
+        blockedRoutes: editorDocument.blockedRoutes,
       });
       const saved = await repository.savePreparedMap(repaired);
       latestRecordRef.current = saved;
@@ -454,17 +497,18 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
         <header className="aop-terrain-editor-header">
           <div className="aop-editor-name">
             <span className="aop-label">Harita Hazırlık Masası</span>
-            <input id={titleId} value={displayName} onChange={(event) => setDisplayName(event.target.value)} onBlur={commitName} aria-label="Harita görünen adı" />
+            <input id={titleId} value={displayName} readOnly={readOnly} onChange={(event) => setDisplayName(event.target.value)} onBlur={commitName} aria-label="Harita görünen adı" />
           </div>
           <p id={descriptionId} className="sr-only">SVG yüzeylerini kara, okyanus, göl veya yoksayılan alan olarak hazırlayan tam ekran çalışma alanı.</p>
-          <div className="aop-editor-save-state" aria-live="polite"><span className={saveStatus.includes('başarısız') ? 'is-error' : ''}>{saveStatus}</span>{dirtyRoom && <small>Odaya uygulanmadı</small>}</div>
+          <div className="aop-editor-save-state" aria-live="polite"><span className={saveStatus.includes('başarısız') ? 'is-error' : ''}>{readOnly ? 'Salt okunur oda haritası' : saveStatus}</span>{!readOnly && dirtyRoom && <small>Odaya uygulanmadı</small>}</div>
           <div className="aop-editor-header-actions">
-            <button type="button" onClick={handleUndo} disabled={!history.past.length || pending} aria-label="Geri al">↶ <span>Geri Al</span></button>
-            <button type="button" onClick={handleRedo} disabled={!history.future.length || pending} aria-label="Yinele">↷ <span>Yinele</span></button>
-            <button type="button" className="aop-local-save-button" onClick={() => flushDraft().catch(() => {})} disabled={pending || saveStatus === 'Kaydediliyor…'} aria-label="Taslağı hemen yerel olarak kaydet">Yerel Kaydet</button>
+            {!readOnly && <button type="button" onClick={handleUndo} disabled={!history.past.length || pending} aria-label="Geri al">↶ <span>Geri Al</span></button>}
+            {!readOnly && <button type="button" onClick={handleRedo} disabled={!history.future.length || pending} aria-label="Yinele">↷ <span>Yinele</span></button>}
+            {!readOnly && <button type="button" className="aop-local-save-button" onClick={() => flushDraft().catch(() => {})} disabled={pending || saveStatus === 'Kaydediliyor…'} aria-label="Taslağı hemen yerel olarak kaydet">Yerel Kaydet</button>}
             <button type="button" onClick={() => setExportOpen(true)} disabled={pending || !analysisIsCurrent}>Dışa Aktar</button>
-            <button type="button" onClick={resetAutomaticAnalysis} disabled={pending || !(record.originalSvg || record.baseSvg)}>Analizi Sıfırla</button>
-            <button type="button" className="is-primary" onClick={applyRoom} disabled={pending || !currentValidation.valid}>Odaya Uygula</button>
+            <button type="button" className="aop-editor-inspector-button" onClick={() => setInspectorOpen(true)}>Ayarlar</button>
+            {!readOnly && <button type="button" onClick={resetAutomaticAnalysis} disabled={pending || !(record.originalSvg || record.baseSvg)}>Analizi Sıfırla</button>}
+            {!readOnly && <button type="button" className="is-primary" onClick={applyRoom} disabled={pending || !currentValidation.valid}>Odaya Uygula</button>}
             <button type="button" onClick={requestClose} disabled={pending} aria-label="Harita editörünü kapat">×</button>
           </div>
         </header>
@@ -498,9 +542,10 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
               onGestureChange={setActiveGesture}
               onZoomChange={setZoom}
               boundaryPreview={boundaryPreview?.valid ? boundaryPreview : null}
+              navalSourceId={inspectorSection === 'naval' ? navalSourceId : null}
             />
             {tool === 'brush' && <div className="aop-touch-brush-mode" role="group" aria-label="Dokunmatik fırça modu"><button type="button" aria-pressed={brushMode === 'add'} onClick={() => setBrushMode('add')}>Ekle</button><button type="button" aria-pressed={brushMode === 'subtract'} onClick={() => setBrushMode('subtract')}>Çıkar</button></div>}
-            {selectedIds.length > 0 && <div className="aop-selection-bar"><strong>{selectedIds.length} yüzey seçili</strong><button type="button" onClick={openClassification}>Seçileni Sınıflandır</button><button type="button" onClick={analyzeBoundary}>Seçimi Sınır Halkası Olarak Analiz Et</button><span className="aop-selection-ring-hint">Dolu alanı değil, bitişik yüzeylerden oluşan bağlı bir halka seç.</span><button type="button" onClick={() => changeSelection([])}>Temizle</button></div>}
+            {selectedIds.length > 0 && <div className="aop-selection-bar"><strong>{selectedIds.length} yüzey seçili</strong>{!readOnly && <button type="button" onClick={openClassification}>Seçileni Sınıflandır</button>}{!readOnly && <button type="button" onClick={analyzeBoundary}>Seçimi Sınır Halkası Olarak Analiz Et</button>}<span className="aop-selection-ring-hint">{readOnly ? 'Harita verisi salt okunur.' : 'Dolu alanı değil, bitişik yüzeylerden oluşan bağlı bir halka seç.'}</span><button type="button" onClick={() => changeSelection([])}>Temizle</button></div>}
           </main>
 
           <div className={`aop-editor-inspector-wrap ${inspectorOpen ? 'is-open' : ''}`}>
@@ -519,6 +564,12 @@ export function TerrainMapEditor({ initialRecord, repository, onApply, onClose, 
               section={inspectorSection}
               onSectionChange={setInspectorSection}
               classificationFocusRequest={classificationFocusRequest}
+              readOnly={readOnly}
+              navalSourceId={navalSourceId}
+              onNavalSourceChange={(surfaceId) => { setNavalSourceId(surfaceId); changeSelection([surfaceId]); setInspectedId(surfaceId); }}
+              onNavalPolicyChange={changeNavalPolicy}
+              onNavalRouteToggle={toggleNavalRoute}
+              onResetNavalRoutes={resetNavalRoutes}
             />
           </div>
         </div>

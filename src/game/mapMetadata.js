@@ -7,6 +7,7 @@ import {
   METADATA_SCHEMA_VERSION,
   TERRAIN_TYPES,
 } from './terrainModel';
+import { normalizeNavigationMask } from './waterNavigation';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const METADATA_ID = 'age-of-paper-map';
@@ -17,7 +18,7 @@ const SOURCE_TYPES = new Set(['automatic', 'metadata', 'host_override']);
 const TOP_LEVEL_FIELDS = new Set([
   'schemaVersion', 'editorVersion', 'analysisAlgorithmVersion', 'mapId', 'revision', 'displayName',
   'sourceGeometryHash', 'baseSvgHash', 'compact', 'viewBox', 'compatibilityRoutes', 'surfaces',
-  'importIssues',
+  'importIssues', 'navalPolicy', 'allowedRoutes', 'blockedRoutes', 'navigationMask',
 ]);
 const SURFACE_FIELDS = new Set([
   'id', 'elementId', 'name', 'terrainType', 'classificationSource', 'confidence',
@@ -129,8 +130,26 @@ export function createMetadataPackage(document, { compact = false } = {}) {
     compact,
     viewBox: document.viewBox,
     compatibilityRoutes: document.validCompatibilityRoutes || document.compatibilityRoutes || [],
+    navalPolicy: document.navalPolicy,
+    allowedRoutes: document.allowedRoutes || [],
+    blockedRoutes: document.blockedRoutes || [],
+    navigationMask: document.navigationMask || null,
     importIssues: Array.isArray(document.importIssues) ? document.importIssues.slice(0, 1000) : [],
     surfaces: (document.surfaces || []).map((surface) => surfaceMetadata(surface, compact)),
+  });
+}
+
+export function migrateMetadataPackage(metadata) {
+  if (!metadata || typeof metadata !== 'object' || metadata.schemaVersion !== 1) return metadata;
+  const legacyRoutes = Array.isArray(metadata.compatibilityRoutes) ? metadata.compatibilityRoutes : [];
+  return canonicalize({
+    ...metadata,
+    schemaVersion: METADATA_SCHEMA_VERSION,
+    editorVersion: EDITOR_SCHEMA_VERSION,
+    navalPolicy: legacyRoutes.length ? 'selected_routes' : 'all_coasts',
+    allowedRoutes: legacyRoutes,
+    blockedRoutes: [],
+    navigationMask: null,
   });
 }
 
@@ -153,6 +172,9 @@ export function validateMetadataPackage(metadata, { elementIds } = {}) {
   if (!Array.isArray(metadata.importIssues) || metadata.importIssues.length > 1000) errors.push(issue('INVALID_IMPORT_ISSUES', 'Metadata importIssues listesi geçersiz.'));
   if (Object.keys(metadata).some((key) => !TOP_LEVEL_FIELDS.has(key))) errors.push(issue('UNKNOWN_METADATA_FIELD', 'Metadata bilinmeyen bir üst düzey alan içeriyor.'));
   if (typeof metadata.compact !== 'boolean') errors.push(issue('INVALID_COMPACT_FLAG', 'Metadata compact alanı true veya false olmalı.'));
+  if (!['all_coasts', 'selected_routes', 'disabled'].includes(metadata.navalPolicy)) errors.push(issue('INVALID_NAVAL_POLICY', 'Deniz politikası desteklenmiyor.'));
+  if (!Array.isArray(metadata.allowedRoutes) || !Array.isArray(metadata.blockedRoutes)) errors.push(issue('INVALID_NAVAL_ROUTES', 'Deniz rota listeleri geçersiz.'));
+  if (metadata.navigationMask !== null && !normalizeNavigationMask(metadata.navigationMask)) errors.push(issue('INVALID_NAVIGATION_MASK', 'Görsel su navigasyon maskesi geçersiz.'));
   if (!metadata.viewBox || ![metadata.viewBox.x, metadata.viewBox.y, metadata.viewBox.width, metadata.viewBox.height].every(Number.isFinite)
     || metadata.viewBox.width <= 0 || metadata.viewBox.height <= 0) errors.push(issue('INVALID_VIEWBOX', 'Metadata viewBox alanı geçersiz.'));
   const ids = new Set();
@@ -182,6 +204,20 @@ export function validateMetadataPackage(metadata, { elementIds } = {}) {
     if (surface.elementId !== null && surface.elementId !== undefined) {
       if (!SAFE_REGION_ID.test(surface.elementId)) errors.push(issue('INVALID_ELEMENT_REFERENCE', 'SVG öğe kimliği güvenli değil.', surface.id));
       if (elementIds && !elementIds.has(surface.elementId)) errors.push(issue('MISSING_ELEMENT_REFERENCE', 'Metadata SVG içinde bulunmayan bir öğeye başvuruyor.', surface.id));
+    }
+  }
+  const surfaceById = Object.fromEntries(surfaces.map((surface) => [surface.id, surface]));
+  for (const [field, routes] of [['allowedRoutes', metadata.allowedRoutes], ['blockedRoutes', metadata.blockedRoutes]]) {
+    const seenRoutes = new Set();
+    for (const route of Array.isArray(routes) ? routes : []) {
+      const validPair = Array.isArray(route) && route.length === 2 && typeof route[0] === 'string' && typeof route[1] === 'string'
+        && route[0].localeCompare(route[1]) < 0;
+      const key = validPair ? `${route[0]}::${route[1]}` : '';
+      const endpointsValid = validPair && [route[0], route[1]].every((id) => (
+        surfaceById[id]?.terrainType === 'land' && ['ocean', 'lake', 'both'].includes(surfaceById[id]?.coastType)
+      ));
+      if (!validPair || !endpointsValid || seenRoutes.has(key)) errors.push(issue('INVALID_NAVAL_ROUTE', `${field} normalize edilmiş, benzersiz kıyı çiftleri içermeli.`));
+      seenRoutes.add(key);
     }
   }
   for (const surface of surfaces) {
@@ -224,7 +260,7 @@ export function extractMapMetadata(svgText) {
     if (!text || text.length > MAX_METADATA_CHARACTERS) {
       return { found: true, valid: false, metadata: null, errors: [issue('METADATA_SIZE', 'Metadata boş veya izin verilen boyutu aşıyor.')] };
     }
-    const metadata = JSON.parse(text);
+    const metadata = migrateMetadataPackage(JSON.parse(text));
     const elementIds = new Set([...document.querySelectorAll('[id]')]
       .map((element) => element.id)
       .filter((id) => id !== METADATA_ID));

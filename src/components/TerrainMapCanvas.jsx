@@ -8,6 +8,7 @@ import {
   visitBrushSurface,
 } from '../game/editorSelection';
 import { revealEditorBounds } from '../game/editorCamera';
+import { isNavalRouteAllowed } from '../game/navalPolicy';
 
 function gridPath(surface, viewBox) {
   if (surface.geometry?.type !== 'grid_runs') return '';
@@ -50,6 +51,7 @@ export const TerrainMapCanvas = forwardRef(function TerrainMapCanvas({
   onGestureChange,
   onZoomChange,
   boundaryPreview,
+  navalSourceId,
 }, forwardedRef) {
   const containerRef = useRef(null);
   const pointerRef = useRef(null);
@@ -112,6 +114,34 @@ export const TerrainMapCanvas = forwardRef(function TerrainMapCanvas({
   }, [boundaryPreview, camera, record, selectedIds]);
 
   const synthetic = useMemo(() => record.terrainDocument.surfaces.filter((surface) => surface.synthetic), [record]);
+  const navalTargets = useMemo(() => {
+    const source = record.terrainDocument.surfacesById[navalSourceId];
+    if (!source || source.terrainType !== 'land' || source.coastType === 'none') return [];
+    const map = {
+      navalPolicy: record.terrainDocument.navalPolicy,
+      allowedRoutes: record.terrainDocument.allowedRoutes,
+      blockedRoutes: record.terrainDocument.blockedRoutes,
+      regionsById: record.terrainDocument.surfacesById,
+    };
+    return record.terrainDocument.surfaces
+      .filter((surface) => surface.id !== source.id && surface.terrainType === 'land' && surface.coastType !== 'none' && surface.bounds)
+      .map((surface) => ({ ...surface, access: isNavalRouteAllowed(map, source.id, surface.id) }));
+  }, [navalSourceId, record]);
+
+  useEffect(() => {
+    const svg = containerRef.current?.querySelector('.aop-terrain-art > svg');
+    if (!svg) return;
+    svg.querySelectorAll('[data-editor-naval]').forEach((element) => element.removeAttribute('data-editor-naval'));
+    if (navalSourceId) {
+      const source = record.terrainDocument.surfacesById[navalSourceId];
+      const sourceElement = source?.elementId ? svg.getElementById?.(source.elementId) : null;
+      sourceElement?.setAttribute('data-editor-naval', 'source');
+    }
+    navalTargets.forEach((target) => {
+      const element = target.elementId ? svg.getElementById?.(target.elementId) : null;
+      element?.setAttribute('data-editor-naval', target.access.allowed ? 'allowed' : 'blocked');
+    });
+  }, [navalSourceId, navalTargets, record]);
 
   const worldPoint = (event) => {
     const bounds = containerRef.current.getBoundingClientRect();
@@ -314,6 +344,20 @@ export const TerrainMapCanvas = forwardRef(function TerrainMapCanvas({
             ⚓̸
           </text>
         ))}
+        {navalSourceId && navalTargets.map((target) => {
+          const source = record.terrainDocument.surfacesById[navalSourceId];
+          if (!source?.bounds) return null;
+          return (
+            <line
+              key={`naval-${navalSourceId}-${target.id}`}
+              className={`aop-editor-naval-line ${target.access.allowed ? 'is-allowed' : 'is-blocked'}`}
+              x1={source.bounds.x + source.bounds.width / 2}
+              y1={source.bounds.y + source.bounds.height / 2}
+              x2={target.bounds.x + target.bounds.width / 2}
+              y2={target.bounds.y + target.bounds.height / 2}
+            />
+          );
+        })}
         {marquee && <rect className="aop-marquee" {...marquee.rect} />}
       </svg>
     </div>

@@ -10,7 +10,7 @@ import { WaitingRoom } from './components/WaitingRoom';
 import { MapImportConflictDialog } from './components/MapImportConflictDialog';
 import { TerrainMapEditor } from './components/TerrainMapEditor';
 import { MapMetadataConflictError, prepareSvgMap, rebuildPreparedMap, validatePreparedMapRecord } from './game/mapImporter';
-import { deriveTerrainDocument } from './game/terrainModel';
+import { EDITOR_SCHEMA_VERSION, METADATA_SCHEMA_VERSION, deriveTerrainDocument } from './game/terrainModel';
 import { readSvgFile } from './game/svgUpload';
 import { PHASES, resolvePhase } from './game/phases';
 import { normalizeNavalRegions } from './game/navalRoutes';
@@ -21,7 +21,6 @@ import {
   joinRoom as joinRoomTransaction,
   leaveRoom as leaveRoomTransaction,
   setRoomMap,
-  configureNavalMap,
   startGame as startGameTransaction,
   updatePresence,
 } from './services/roomService';
@@ -91,7 +90,7 @@ function App() {
   const [importConflict, setImportConflict] = useState(null);
   const [analysisProgress, setAnalysisProgress] = useState(null);
   const [recentMapsRevision, setRecentMapsRevision] = useState(0);
-  const [roomAssetState, setRoomAssetState] = useState({ key: '', status: 'idle', svg: '', error: '' });
+  const [roomAssetState, setRoomAssetState] = useState({ key: '', status: 'idle', svg: '', navigation: null, error: '' });
   const [roomAssetRetry, setRoomAssetRetry] = useState(0);
   const analysisAbortRef = useRef(null);
   const latestRoomDataRef = useRef(roomData);
@@ -214,14 +213,14 @@ function App() {
     if (!currentRoom || !roomCode || !mapRepository) return undefined;
     const manifest = currentRoom.mapManifest;
     if (!manifest) {
-      setRoomAssetState({ key: 'legacy', status: 'ready', svg: currentRoom.mapSvg || '', error: '' });
+      setRoomAssetState({ key: 'legacy', status: 'ready', svg: currentRoom.mapSvg || '', navigation: null, error: '' });
       return undefined;
     }
     const key = `${manifest.baseSvgHash}:${manifest.metadataHash}:${manifest.revision}`;
     let cancelled = false;
     setRoomAssetState((current) => current.key === key && current.status === 'ready'
       ? current
-      : { key, status: 'loading', svg: '', error: '' });
+      : { key, status: 'loading', svg: '', navigation: null, error: '' });
     const fetchAsset = async (kind, hash) => {
       const reference = doc(db, 'rooms', roomCode, 'mapAssets', `${kind}_${hash}`);
       const snapshot = await getDoc(reference);
@@ -231,17 +230,23 @@ function App() {
     resolveRoomMapAssets({ manifest, repository: mapRepository, fetchAsset }).then(async (resolved) => {
       if (cancelled) return;
       const existing = await mapRepository.getPreparedMap(manifest.mapId);
-      if (existing) {
+      if (existing?.metadataHash === manifest.metadataHash && existing.terrainDocument) {
         await mapRepository.savePreparedMap({ ...existing, sanitizedSvg: resolved.svg, sourceLabel: `Oda ${roomCode}`, updatedAt: Date.now() });
       } else {
         await archiveResolvedRoomMap(mapRepository, resolved, currentRoom.mapDefinition, currentRoom.mapValidation, roomCode);
       }
       if (!cancelled) {
-        setRoomAssetState({ key, status: 'ready', svg: resolved.svg, error: '' });
+        setRoomAssetState({
+          key,
+          status: 'ready',
+          svg: resolved.svg,
+          navigation: resolved.metadataAsset.metadata.navigationMask || null,
+          error: '',
+        });
         setRecentMapsRevision((value) => value + 1);
       }
     }).catch((assetError) => {
-      if (!cancelled) setRoomAssetState({ key, status: 'error', svg: '', error: assetError.message });
+      if (!cancelled) setRoomAssetState({ key, status: 'error', svg: '', navigation: null, error: assetError.message });
     });
     return () => { cancelled = true; };
   }, [legacyRoomSvg, mapRepository, roomAssetRetry, roomCode, roomManifestKey]);
@@ -251,7 +256,11 @@ function App() {
     const normalized = normalizeLegacyRoom(roomData);
     if (!normalized.mapManifest) return normalized;
     const key = `${normalized.mapManifest.baseSvgHash}:${normalized.mapManifest.metadataHash}:${normalized.mapManifest.revision}`;
-    return { ...normalized, mapSvg: roomAssetState.key === key && roomAssetState.status === 'ready' ? roomAssetState.svg : '' };
+    return {
+      ...normalized,
+      mapSvg: roomAssetState.key === key && roomAssetState.status === 'ready' ? roomAssetState.svg : '',
+      mapNavigation: roomAssetState.key === key && roomAssetState.status === 'ready' ? roomAssetState.navigation : null,
+    };
   }, [roomAssetState, roomData]);
 
   const resetApp = async () => {
@@ -409,26 +418,22 @@ function App() {
     }
   };
 
-  const editNavalMap = async (edit) => {
-    if (!user) return { ok: false, reason: 'Oturum bulunamadı.' };
-    setLoading(true);
-    setError('');
-    try {
-      return await configureNavalMap(roomCode, user.uid, edit);
-    } catch (editError) {
-      setError(editError.message);
-      return { ok: false, code: editError.code, reason: editError.message };
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const openPreparedMap = async (record) => {
     setLoading(true);
     setError('');
     try {
       validatePreparedMapRecord(record, { allowOutdatedAnalysis: true });
-      setEditorRecord(record);
+      let opened = record;
+      if (record.terrainDocument && (
+        record.terrainDocument.editorSchemaVersion !== EDITOR_SCHEMA_VERSION
+        || record.terrainDocument.metadataSchemaVersion !== METADATA_SCHEMA_VERSION
+        || !record.terrainDocument.navalPolicy
+      )) {
+        opened = await rebuildPreparedMap(record, deriveTerrainDocument(record.terrainDocument));
+        opened = await mapRepository.savePreparedMap(opened);
+        setRecentMapsRevision((value) => value + 1);
+      }
+      setEditorRecord(opened);
     } catch (openError) {
       setError(`Yerel harita doğrulanamadı: ${openError.message}`);
     } finally {
@@ -446,6 +451,14 @@ function App() {
       if (!local?.terrainDocument) {
         if (!effectiveRoom.mapSvg) throw new Error('Doğrulanmış oda SVG asset’i henüz hazır değil.');
         local = await prepareSvgMap(local?.preparedSvg || effectiveRoom.mapSvg, { sourceLabel: `Oda ${roomCode}` });
+        await mapRepository.savePreparedMap(local);
+      }
+      if (local.terrainDocument && (
+        local.terrainDocument.editorSchemaVersion !== EDITOR_SCHEMA_VERSION
+        || local.terrainDocument.metadataSchemaVersion !== METADATA_SCHEMA_VERSION
+        || !local.terrainDocument.navalPolicy
+      )) {
+        local = await rebuildPreparedMap(local, deriveTerrainDocument(local.terrainDocument));
         await mapRepository.savePreparedMap(local);
       }
       setEditorRecord(local);
@@ -511,6 +524,9 @@ function App() {
           const remapped = deriveTerrainDocument({
             ...analyzed.terrainDocument,
             revision: oldMetadata.revision + 1,
+            navalPolicy: oldMetadata.navalPolicy,
+            allowedRoutes: oldMetadata.allowedRoutes,
+            blockedRoutes: oldMetadata.blockedRoutes,
             surfaces: analyzed.terrainDocument.surfaces.map((surface) => oldById[surface.id]
               ? {
                 ...surface,
@@ -583,7 +599,6 @@ function App() {
         handleMapUpload={handleMapUpload}
         handleMapFile={handleMapFile}
         startGame={startGame}
-        editNavalMap={editNavalMap}
         leaveRoom={leaveRoom}
         resetApp={resetApp}
         loading={loading}
@@ -597,7 +612,7 @@ function App() {
         cancelMapAnalysis={() => analysisAbortRef.current?.abort()}
         roomAssetState={roomAssetState}
       />
-      {editorRecord && mapRepository && <TerrainMapEditor initialRecord={editorRecord} repository={mapRepository} onApply={(record) => applyPreparedMap(record, false)} onClose={() => setEditorRecord(null)} onDraftChange={() => setRecentMapsRevision((value) => value + 1)} />}
+      {editorRecord && mapRepository && <TerrainMapEditor initialRecord={editorRecord} repository={mapRepository} onApply={(record) => applyPreparedMap(record, false)} onClose={() => setEditorRecord(null)} onDraftChange={() => setRecentMapsRevision((value) => value + 1)} readOnly={effectiveRoom.hostId !== user.uid} />}
       {importConflict && <MapImportConflictDialog conflict={importConflict} onChoice={resolveImportConflict} />}
     </>);
   }

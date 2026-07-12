@@ -1,9 +1,8 @@
 import { useRef, useState } from 'react';
 import { MAX_PLAYERS } from '../constants';
-import { listNavalRoutes } from '../game/navalRoutes';
+import { NAVAL_POLICIES, normalizeNavalConfig } from '../game/navalPolicy';
 import { CopyBtn } from './CopyBtn';
 import { Icon, Icons } from './Icons';
-import { NavalRouteEditor } from './NavalRouteEditor';
 import { RecentMaps } from './RecentMaps';
 
 function ValidationSummary({ validation }) {
@@ -49,12 +48,15 @@ function ValidationSummary({ validation }) {
 function NavalInfrastructureSummary({ roomData }) {
   const regions = Object.values(roomData.mapDefinition?.regionsById || {});
   const coastalCount = regions.filter((region) => region.coastal).length;
-  const routeCount = listNavalRoutes(roomData.mapDefinition).length;
+  const config = normalizeNavalConfig(roomData.mapDefinition, { mapDefinition: roomData.mapDefinition, defaultPolicy: NAVAL_POLICIES.SELECTED_ROUTES });
+  const routeCount = config.allowedRoutes.length;
   return (
     <div className="aop-naval-summary" aria-label="Deniz altyapısı özeti">
       <div className="aop-label">Deniz Altyapısı</div>
-      <strong>{coastalCount} kıyı bölgesi · {routeCount} çift yönlü rota</strong>
-      {!routeCount && <p>Deniz rotası yok — oyun yalnızca kara harekâtıyla devam edebilir.</p>}
+      <strong>{coastalCount} kıyı bölgesi · {config.navalPolicy === NAVAL_POLICIES.ALL_COASTS ? `${config.blockedRoutes.length} engel` : config.navalPolicy === NAVAL_POLICIES.DISABLED ? 'kapalı' : `${routeCount} özel rota`}</strong>
+      {config.navalPolicy === NAVAL_POLICIES.ALL_COASTS && <p>Bütün geçerli kıyılar varsayılan olarak erişilebilir.</p>}
+      {config.navalPolicy === NAVAL_POLICIES.SELECTED_ROUTES && !routeCount && <p>Özel rota yok — deniz harekâtı kullanılamaz.</p>}
+      {config.navalPolicy === NAVAL_POLICIES.DISABLED && <p>Liman ve bütün deniz harekâtı savaş sırasında gizlenecek.</p>}
     </div>
   );
 }
@@ -67,7 +69,6 @@ export const WaitingRoom = ({
   handleMapUpload,
   handleMapFile,
   startGame,
-  editNavalMap,
   leaveRoom,
   resetApp,
   loading,
@@ -82,12 +83,9 @@ export const WaitingRoom = ({
   roomAssetState,
 }) => {
   const [dragActive, setDragActive] = useState(false);
-  const [navalOpen, setNavalOpen] = useState(false);
   const dragDepth = useRef(0);
   const fileInput = useRef(null);
-  const navalButton = useRef(null);
   const hasValidMap = Boolean(roomData.mapValidation?.valid && roomData.mapSvg && roomData.mapDefinition);
-  const hasLegacyRoutes = listNavalRoutes(roomData.mapDefinition).length > 0;
   const preventFileNavigation = (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -117,8 +115,8 @@ export const WaitingRoom = ({
   };
 
   return (
-  <div className={`aop-lobby-shell aop-desk text-[var(--aop-text)] ${navalOpen ? 'is-dialog-open' : ''}`} data-testid="lobby-scroll-owner">
-    <div className="aop-lobby-content" inert={navalOpen ? '' : undefined} aria-hidden={navalOpen || undefined}>
+  <div className="aop-lobby-shell aop-desk text-[var(--aop-text)]" data-testid="lobby-scroll-owner">
+    <div className="aop-lobby-content">
     <header className="aop-lobby-header">
       <div className="flex items-center gap-3">
         <Icon p={Icons.Map} c="text-[var(--aop-gold)]" />
@@ -221,7 +219,6 @@ export const WaitingRoom = ({
                   >
                     Oda Haritasını Hazırlık Masasında Aç
                   </button>
-                  {hasLegacyRoutes && <button ref={navalButton} type="button" className="w-full aop-button-secondary min-h-12 px-3" disabled={loading} onClick={() => setNavalOpen(true)}>Legacy Deniz Rotalarını Gör</button>}
                 </>
               )}
               {roomAssetState?.status === 'loading' && <p className="aop-validation-note">Harita hash cache’i kontrol ediliyor…</p>}
@@ -242,12 +239,11 @@ export const WaitingRoom = ({
                 <>
                   <NavalInfrastructureSummary roomData={roomData} />
                   <button
-                    ref={navalButton}
                     type="button"
                     className="w-full aop-button-secondary min-h-12 px-3"
-                    onClick={() => setNavalOpen(true)}
+                    onClick={onEditRoomMap}
                   >
-                    Deniz Bağlantılarını Gör
+                    Harita ve Deniz Ayarlarını Gör
                   </button>
                 </>
               )}
@@ -258,17 +254,6 @@ export const WaitingRoom = ({
       {isHost && mapRepository && <RecentMaps repository={mapRepository} onEdit={onEditPreparedMap} onUse={onUsePreparedMap} refreshToken={recentMapsRevision} />}
     </main>
     </div>
-    {navalOpen && hasValidMap && (
-      <NavalRouteEditor
-        roomData={roomData}
-        roomCode={roomCode}
-        onEdit={editNavalMap}
-        onClose={() => setNavalOpen(false)}
-        returnFocusRef={navalButton}
-        isHost={false}
-        loading={loading}
-      />
-    )}
   </div>
   );
 };

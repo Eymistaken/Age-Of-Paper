@@ -75,6 +75,14 @@ afterEach(async () => {
 });
 
 describe('MapViewer pointer interactions', () => {
+  it('paints legal naval targets green and invalid coastal targets red through distinct classes', async () => {
+    await renderMap({ highlightTargetIds: ['a'] });
+    expect(container.querySelector('[data-region-id="a"]').classList.contains('target-land')).toBe(true);
+    await renderMap({ highlightInvalidTargetIds: ['a'] });
+    const mapRegion = container.querySelector('[data-region-id="a"]');
+    expect(mapRegion.classList.contains('invalid-target-land')).toBe(true);
+    expect(mapRegion.classList.contains('target-land')).toBe(false);
+  });
   it('selects on mouse press/release without eager pointer capture', async () => {
     const map = await renderMap();
     const mapRegion = container.querySelector('[data-region-id="a"]');
