@@ -80,6 +80,19 @@ describe('shared SVG surface candidate ownership', () => {
     expect(result.importIssues.some((issue) => issue.code === 'DUPLICATE_ID')).toBe(false);
   });
 
+  it('treats unmeasured same-id marker tags as auxiliary when a path is primary', () => {
+    const svg = parseSvg(`<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <path id="shared" d="M0 0H100V100H0Z"/>
+      <circle id="shared" cx="50" cy="50" style="r: 3px"/>
+      <ellipse id="shared" cx="50" cy="50" style="rx: 4px; ry: 2px"/>
+      <rect id="shared" x="48" y="48" style="width: 4px; height: 4px"/>
+    </svg>`);
+    const result = extractSurfaceCandidates(svg, { viewBox: { x: 0, y: 0, width: 100, height: 100 } });
+    expect(result.records.map((record) => record.tagName)).toEqual(['path']);
+    expect(result.auxiliary.map((candidate) => candidate.tagName)).toEqual(['circle', 'ellipse', 'rect']);
+    expect(result.importIssues.some((issue) => issue.code === 'DUPLICATE_ID')).toBe(false);
+  });
+
   it('keeps similarly significant duplicate paths invalid', () => {
     installGeometryMocks();
     const svg = parseSvg(`<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">

@@ -92,6 +92,7 @@ function nearCentroid(owner, marker) {
 
 function isCredibleMarker(candidate, owner) {
   if (candidate.explicit || !MARKER_TAGS.has(candidate.tagName)) return false;
+  if (REGION_GEOMETRY_TAGS.has(owner.tagName)) return true;
   const candidateArea = area(candidate.bounds);
   const ownerArea = area(owner.bounds);
   if (candidateArea === null || ownerArea === null || candidateArea / ownerArea > MAX_MARKER_AREA_RATIO) return false;
