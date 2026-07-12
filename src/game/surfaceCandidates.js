@@ -39,6 +39,16 @@ export function parseSurfaceViewBox(svg) {
 
 export function isRenderableSurfaceElement(element) {
   if (element.closest(EXCLUDED_ANCESTORS)) return false;
+
+  const parentG = element.closest('g');
+  if (parentG && (parentG.getAttribute('id') === 'points' || parentG.getAttribute('id') === 'calibration' || parentG.getAttribute('id') === 'reference')) {
+    return false;
+  }
+  const className = element.getAttribute('class');
+  if (className && /^-?\d+(?:\.\d+)?\|-?\d+(?:\.\d+)?$/.test(className.trim())) {
+    return false;
+  }
+
   const style = (element.getAttribute('style') || '').toLowerCase();
   const fill = (element.getAttribute('fill') || '').trim().toLowerCase();
   return element.getAttribute('display') !== 'none'

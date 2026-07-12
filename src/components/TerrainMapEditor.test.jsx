@@ -53,8 +53,10 @@ async function selectLandAndClassify(label = 'Göl') {
 }
 
 async function settlePromises() {
-  await vi.runAllTimersAsync();
-  for (let index = 0; index < 20; index += 1) await Promise.resolve();
+  for (let index = 0; index < 10; index += 1) {
+    await vi.runAllTimersAsync();
+    for (let tick = 0; tick < 50; tick += 1) await Promise.resolve();
+  }
 }
 
 describe('terrain map editor workspace', () => {

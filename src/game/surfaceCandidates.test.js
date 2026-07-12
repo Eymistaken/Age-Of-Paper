@@ -153,4 +153,36 @@ describe('shared SVG surface candidate ownership', () => {
     expect(first.records[0].bounds.width).toBeCloseTo(200, 10);
     expect(first.records[0].bounds.height).toBeCloseTo(160, 10);
   });
+
+  it('excludes geographic calibration points inside <g id="points"> and preserves their IDs', () => {
+    const svg = parseSvg(`<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <path id="region.a" d="M0 0H100V100H0Z"/>
+      <g id="points">
+        <circle id="0" class="36.13|26.62" cx="10" cy="90" r="3"/>
+      </g>
+    </svg>`);
+    const result = extractSurfaceCandidates(svg, { viewBox: { x: 0, y: 0, width: 100, height: 100 } });
+    
+    // Only the path should be parsed as a playable region
+    expect(result.records.map((record) => record.id)).toEqual(['region_a']);
+    expect(result.auxiliary).toHaveLength(0);
+    
+    // The calibration circle should remain untouched in the SVG and preserve its original ID "0"
+    const circle = svg.querySelector('circle');
+    expect(circle).not.toBeNull();
+    expect(circle.getAttribute('id')).toBe('0');
+  });
+
+  it('excludes elements with latitude|longitude class patterns regardless of parent group', () => {
+    const svg = parseSvg(`<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <path id="region.a" d="M0 0H100V100H0Z"/>
+      <circle id="standalone-cal" class="-38.64|36.19" cx="50" cy="50"/>
+    </svg>`);
+    const result = extractSurfaceCandidates(svg, { viewBox: { x: 0, y: 0, width: 100, height: 100 } });
+    
+    expect(result.records.map((record) => record.id)).toEqual(['region_a']);
+    expect(result.auxiliary).toHaveLength(0);
+    expect(svg.querySelector('#standalone-cal')).not.toBeNull();
+    expect(svg.querySelector('#standalone-cal').getAttribute('id')).toBe('standalone-cal');
+  });
 });
