@@ -78,6 +78,18 @@ function room(overrides = {}) {
   };
 }
 
+const navalNavigation = {
+  version: 1,
+  viewBox: { x: 0, y: 0, width: 1000, height: 500 },
+  columns: 2,
+  rows: 1,
+  components: [{ id: 'water', runs: [[0, 1]], portalCell: 0 }],
+  coasts: {
+    a: [{ componentId: 'water', cell: 0 }],
+    b: [{ componentId: 'water', cell: 1 }],
+  },
+};
+
 function pointerEvent(type, overrides = {}) {
   const event = new Event(type, { bubbles: true, cancelable: true });
   const values = {
@@ -447,5 +459,57 @@ describe('MapViewer remote claim focus', () => {
     await act(async () => root.unmount());
     expect(vi.getTimerCount()).toBe(0);
     root = createRoot(container);
+  });
+});
+
+describe('MapViewer naval presentation', () => {
+  it('renders a valid voyage before the first animation frame and cleans it without replaying', async () => {
+    const initial = room({ phase: 'war', mapNavigation: navalNavigation });
+    await renderRoom(initial);
+    window.requestAnimationFrame.mockImplementation(() => 999);
+
+    const action = {
+      type: 'naval_transfer',
+      actorId: 'other',
+      sourceId: 'a',
+      targetId: 'b',
+      amount: 1000,
+      actionId: 'voyage-with-suspended-frame',
+      turnNumber: 5,
+    };
+    await renderRoom({ ...initial, turnNumber: 5, lastAction: action });
+
+    expect(container.querySelectorAll('.aop-voyage-highlight')).toHaveLength(2);
+    expect(container.querySelector('.aop-voyage-ship')).not.toBeNull();
+
+    await advance(1_511);
+    expect(container.querySelector('.aop-voyage-ship')).toBeNull();
+    expect(container.querySelectorAll('.aop-voyage-highlight')).toHaveLength(2);
+    await advance(621);
+    expect(container.querySelector('.aop-naval-presentation')).toBeNull();
+
+    await renderRoom({ ...initial, turnNumber: 5, lastAction: action });
+    expect(container.querySelector('.aop-naval-presentation')).toBeNull();
+  });
+
+  it('keeps reduced-motion voyages highlight-only', async () => {
+    const initial = room({ phase: 'war', mapNavigation: navalNavigation });
+    await renderRoom(initial);
+    window.matchMedia = vi.fn().mockImplementation((query) => ({
+      matches: query === '(prefers-reduced-motion: reduce)', media: query,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    }));
+
+    await renderRoom({
+      ...initial,
+      turnNumber: 5,
+      lastAction: {
+        type: 'naval_attack', actorId: 'other', sourceId: 'a', targetId: 'b',
+        amount: 1000, actionId: 'reduced-voyage', turnNumber: 5,
+      },
+    });
+
+    expect(container.querySelectorAll('.aop-voyage-highlight')).toHaveLength(2);
+    expect(container.querySelector('.aop-voyage-ship')).toBeNull();
   });
 });

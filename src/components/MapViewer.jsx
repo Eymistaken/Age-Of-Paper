@@ -402,6 +402,10 @@ export const MapViewer = forwardRef(function MapViewer({
     const effect = result.effect;
     const generation = automationGenerationRef.current;
     const path = computeNavalPresentationPath(roomData.mapNavigation, effect.sourceId, effect.targetId);
+    const motionReduced = reducedMotion();
+    const initialSample = !motionReduced && path.kind !== 'highlight_only'
+      ? sampleNavalPresentation(path, 0)
+      : null;
     let finished = false;
     const finish = () => {
       if (finished) return;
@@ -423,12 +427,12 @@ export const MapViewer = forwardRef(function MapViewer({
       sourceId: effect.sourceId,
       targetId: effect.targetId,
       operation: effect.operation,
-      moving: false,
-      point: null,
-      opacity: 0,
+      moving: initialSample?.visible === true,
+      point: initialSample?.point || null,
+      opacity: initialSample?.opacity || 0,
     });
-    if (reducedMotion() || path.kind === 'highlight_only') {
-      navalTimerRef.current = window.setTimeout(finish, reducedMotion() ? 90 : NAVAL_HIGHLIGHT_MS);
+    if (motionReduced || path.kind === 'highlight_only') {
+      navalTimerRef.current = window.setTimeout(finish, motionReduced ? 90 : NAVAL_HIGHLIGHT_MS);
       return () => {
         clearNavalPresentation();
         if (navalPresentationStateRef.current.processedActionKey === effect.actionId) {
