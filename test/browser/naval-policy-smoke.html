@@ -2,12 +2,64 @@
 <html lang="tr">
   <head>
     <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width,initial-scale=1"/>
-    <title>Naval Policy Smoke</title>
-    <style>body{margin:0;background:#111;color:#eee}#map-root{width:100vw;height:72dvh;min-height:420px}#panel-root{position:fixed;right:8px;bottom:8px;width:min(390px,calc(100vw - 16px));max-height:26dvh;overflow:auto;z-index:20}#smoke-result{position:fixed;left:8px;bottom:8px;z-index:30;background:#000;padding:8px;font:12px monospace}</style>
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+    <meta name="robots" content="noindex,nofollow"/>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E"/>
+    <title>Age of Paper · Deniz Sistemi Smoke</title>
+    <style>
+      :root { color-scheme: dark; font-family: Georgia, "Times New Roman", serif; background:#11100d; color:#eadfbe; }
+      * { box-sizing:border-box; }
+      body { margin:0; min-height:100dvh; background:radial-gradient(circle at 20% 0,#2b2519 0,transparent 38%),#11100d; }
+      .smoke-shell { display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,420px); min-height:100dvh; }
+      .smoke-stage { position:relative; min-height:620px; border-right:1px solid #6d5c36; overflow:hidden; }
+      .smoke-map-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); height:72dvh; min-height:460px; }
+      .smoke-map-slot { position:relative; min-width:0; border-right:1px solid rgba(213,185,111,.22); }
+      .smoke-panel-root { position:absolute; right:12px; bottom:12px; width:min(390px,calc(100% - 24px)); max-height:42%; overflow:auto; z-index:30; }
+      .smoke-mobile-root { position:absolute; inset:0; z-index:40; background:#11100d; }
+      .smoke-mobile-root:empty { display:none; }
+      .smoke-report { padding:24px; background:rgba(20,18,14,.94); box-shadow:-18px 0 50px rgba(0,0,0,.35); overflow:auto; max-height:100dvh; }
+      .smoke-kicker { margin:0 0 8px; color:#d5b96f; letter-spacing:.16em; text-transform:uppercase; font:700 11px/1.2 ui-monospace,monospace; }
+      h1 { margin:0; font-size:clamp(24px,3vw,38px); line-height:1; }
+      .smoke-copy { color:#bfb394; line-height:1.5; }
+      #smoke-result { display:block; margin:18px 0; padding:12px 14px; border:1px solid #75633a; background:#17140f; font:700 13px/1.3 ui-monospace,monospace; }
+      #smoke-result[data-status="running"] { color:#d5b96f; }
+      #smoke-result[data-status="pass"] { color:#65d69a; border-color:#347452; }
+      #smoke-result[data-status="fail"] { color:#ef827a; border-color:#8c433e; }
+      .smoke-runtime { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin:0 0 18px; }
+      .smoke-runtime span { border:1px solid rgba(213,185,111,.2); padding:8px; color:#bfb394; font:11px/1.35 ui-monospace,monospace; }
+      .smoke-results { display:grid; gap:8px; padding:0; margin:0; list-style:none; }
+      .smoke-results li { display:grid; grid-template-columns:24px 1fr auto; gap:8px; align-items:start; padding:9px 10px; border-left:3px solid #75633a; background:rgba(255,255,255,.025); }
+      .smoke-results li[data-status="pass"] { border-color:#48aa78; }
+      .smoke-results li[data-status="fail"] { border-color:#d65d55; }
+      .smoke-results b { color:#d5b96f; font:700 11px/1.4 ui-monospace,monospace; }
+      .smoke-results strong { font-size:13px; }
+      .smoke-results small { grid-column:2 / 4; color:#a99d80; font:11px/1.4 ui-monospace,monospace; overflow-wrap:anywhere; }
+      .smoke-results time { color:#8f846c; font:10px/1.4 ui-monospace,monospace; }
+      .smoke-mobile-frame { width:390px; height:844px; border:0; position:absolute; left:-10000px; top:0; }
+      @media (max-width:700px) {
+        .smoke-shell { display:block; }
+        .smoke-stage { min-height:100dvh; border:0; }
+        .smoke-report { position:relative; z-index:60; max-height:none; padding:18px; }
+        .smoke-map-grid { min-height:520px; }
+      }
+    </style>
   </head>
   <body>
-    <div id="map-root"></div><div id="panel-root"></div><output id="smoke-result">RUNNING</output>
+    <main class="smoke-shell">
+      <section class="smoke-stage" aria-label="Sentetik oyun sahnesi">
+        <div class="smoke-map-grid"><div id="map-root-a" class="smoke-map-slot"></div><div id="map-root-b" class="smoke-map-slot"></div></div>
+        <div id="panel-root" class="smoke-panel-root"></div>
+        <div id="mobile-root" class="smoke-mobile-root"></div>
+      </section>
+      <aside class="smoke-report">
+        <p class="smoke-kicker">Sentetik · Firebase'siz · Production Bundle</p>
+        <h1>Deniz sistemi sefer defteri</h1>
+        <p class="smoke-copy">Her satır gerçek production modülleriyle ayrı çalışır. Bir hata genel sonucu başarısız yapar.</p>
+        <output id="smoke-result" data-status="running">RUNNING</output>
+        <div id="smoke-runtime" class="smoke-runtime" aria-label="Tarayıcı bağlamı"></div>
+        <ol id="scenario-results" class="smoke-results"></ol>
+      </aside>
+    </main>
     <script type="module" src="./naval-policy-smoke.jsx"></script>
   </body>
 </html>

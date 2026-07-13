@@ -616,6 +616,16 @@ export const MapViewer = forwardRef(function MapViewer({
     renderCamera(next);
   };
 
+  const wheelHandlerRef = useRef(handleWheel);
+  wheelHandlerRef.current = handleWheel;
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+    const listener = (event) => wheelHandlerRef.current(event);
+    container.addEventListener('wheel', listener, { passive: false });
+    return () => container.removeEventListener('wheel', listener);
+  }, []);
+
   const zoomBy = (factor) => {
     if (!cameraRef.current) return;
     cancelAutomationForManualInput();
@@ -636,7 +646,6 @@ export const MapViewer = forwardRef(function MapViewer({
       onPointerMove={movePointer}
       onPointerUp={(event) => stopPointer(event)}
       onPointerCancel={(event) => stopPointer(event, true)}
-      onWheel={handleWheel}
     >
       <div ref={transformRef} className="aop-map-transform">
         {safeMapSvg && (

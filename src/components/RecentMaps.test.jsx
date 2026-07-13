@@ -9,6 +9,18 @@ let container;
 let root;
 let repository;
 
+async function waitFor(check, message, timeout = 2_000) {
+  const startedAt = performance.now();
+  while (!(await check())) {
+    if (performance.now() - startedAt > timeout) throw new Error(message);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  }
+}
+
+function button(label) {
+  return [...container.querySelectorAll('button')].find((candidate) => candidate.textContent === label);
+}
+
 beforeEach(async () => {
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -25,17 +37,18 @@ describe('Recent Maps library', () => {
   it('shows prepared summaries and opens a stored map without another upload', async () => {
     const onEdit = vi.fn();
     await act(async () => root.render(<RecentMaps repository={repository} onEdit={onEdit} onUse={vi.fn()} />));
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    await waitFor(() => button('Düzenle'), 'Yerel harita düzenleme kontrolü hazır olmadı.');
     expect(container.textContent).toContain('Yerel Harita');
     expect(container.textContent).toContain('1 kara');
-    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Düzenle').click());
+    await act(async () => button('Düzenle').click());
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ mapId: 'map_a' }));
   });
 
   it('requires confirmation before deleting', async () => {
     await act(async () => root.render(<RecentMaps repository={repository} onEdit={vi.fn()} onUse={vi.fn()} />));
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
-    await act(async () => { [...container.querySelectorAll('button')].find((button) => button.textContent === 'Sil').click(); await Promise.resolve(); });
+    await waitFor(() => button('Sil'), 'Yerel harita silme kontrolü hazır olmadı.');
+    await act(async () => { button('Sil').click(); await Promise.resolve(); });
+    await waitFor(async () => (await repository.getPreparedMap('map_a')) === null, 'Yerel harita silme işlemi tamamlanmadı.');
     expect(window.confirm).toHaveBeenCalled();
     expect(await repository.getPreparedMap('map_a')).toBeNull();
   });
@@ -45,8 +58,9 @@ describe('Recent Maps library', () => {
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     const save = vi.spyOn(repository, 'savePreparedMap');
     await act(async () => root.render(<RecentMaps repository={repository} onEdit={vi.fn()} onUse={vi.fn()} />));
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
-    await act(async () => { [...container.querySelectorAll('button')].find((button) => button.textContent === 'Dışa Aktar').click(); await new Promise((resolve) => setTimeout(resolve, 20)); });
+    await waitFor(() => button('Dışa Aktar'), 'Yerel harita dışa aktarma kontrolü hazır olmadı.');
+    await act(async () => button('Dışa Aktar').click());
+    await waitFor(() => save.mock.calls.length > 0, 'Hazırlanmış harita kaydı dışa aktarma sırasında yenilenmedi.');
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ mapId: 'map_a' }));
     expect((await repository.listPreparedMaps()).map((record) => record.mapId)).toEqual(['map_a']);
   });
