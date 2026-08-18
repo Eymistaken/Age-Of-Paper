@@ -23,3 +23,11 @@ test-results
 *.njsproj
 *.sln
 *.sw?
+
+# Android
+android/.gradle
+android/build
+android/*/build
+android/local.properties
+android/.kotlin
+android/app/google-services.json
