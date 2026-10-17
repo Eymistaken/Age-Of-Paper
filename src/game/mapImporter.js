@@ -23,7 +23,7 @@ function parseBoolean(value) {
 }
 
 function parseViewBox(svg) {
-  const parts = (svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+  const parts = (svg.getAttribute('viewBox') || svg.getAttribute('viewbox') || '').trim().split(/[\s,]+/).map(Number);
   if (parts.length === 4 && parts.every(Number.isFinite) && parts[2] > 0 && parts[3] > 0) {
     return { x: parts[0], y: parts[1], width: parts[2], height: parts[3] };
   }

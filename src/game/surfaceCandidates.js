@@ -23,7 +23,7 @@ export function normalizeRegionId(value, fallback = 'region') {
 }
 
 export function parseSurfaceViewBox(svg) {
-  const values = String(svg?.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+  const values = String(svg?.getAttribute('viewBox') || svg?.getAttribute('viewbox') || '').trim().split(/[\s,]+/).map(Number);
   if (values.length === 4 && values.every(Number.isFinite) && values[2] > 0 && values[3] > 0) {
     return { x: values[0], y: values[1], width: values[2], height: values[3] };
   }
@@ -39,6 +39,14 @@ export function parseSurfaceViewBox(svg) {
 
 export function isRenderableSurfaceElement(element) {
   if (element.closest(EXCLUDED_ANCESTORS)) return false;
+
+  if (element.tagName?.toLowerCase() === 'circle') {
+    const rAttr = element.getAttribute('r');
+    const styleR = /r\s*:\s*([^;]+)/i.exec(element.getAttribute('style') || '')?.[1];
+    if (rAttr === null && !styleR) return false;
+    const r = Number(rAttr ?? parseFloat(styleR));
+    if (Number.isFinite(r) && r <= 0) return false;
+  }
 
   const parentG = element.closest('g');
   if (parentG && (parentG.getAttribute('id') === 'points' || parentG.getAttribute('id') === 'calibration' || parentG.getAttribute('id') === 'reference')) {

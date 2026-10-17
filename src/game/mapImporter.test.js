@@ -249,4 +249,21 @@ describe('SVG map importer', () => {
     expect(prepared.validation.valid).toBe(false);
     expect(prepared.validation.errors.map((item) => item.code)).toEqual(expect.arrayContaining(['INVALID_NUMBER', 'INVALID_PORT_ALLOWED']));
   });
+
+  it('handles lowercase viewbox, ignores radius-less circles and preserves neighbors in prepared SVG', async () => {
+    const svg = `<svg viewbox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="10" cy="10" id="zero"/>
+      <circle cx="20" cy="20" r="0" id="zero_radius"/>
+      <rect id="land_a" data-terrain="land" data-claim-neighbors="land_b" width="100" height="100"/>
+      <rect id="land_b" data-terrain="land" data-claim-neighbors="land_a" x="100" width="100" height="100"/>
+    </svg>`;
+    const prepared = await prepareSvgMap(svg, { displayName: 'Case Insensitive Viewbox' });
+    expect(prepared.validation.valid).toBe(true);
+    expect(prepared.mapDefinition.regionIds).toEqual(['land_a', 'land_b']);
+    expect(prepared.mapDefinition.regionsById.land_a.claimNeighbors).toEqual(['land_b']);
+    const importedFromPrepared = importSvgMap(prepared.preparedSvg);
+    expect(importedFromPrepared.validation.valid).toBe(true);
+    expect(importedFromPrepared.mapDefinition.regionsById.land_a.claimNeighbors).toEqual(['land_b']);
+  });
 });
+

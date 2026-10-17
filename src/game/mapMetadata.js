@@ -297,6 +297,12 @@ export function applyCompactMetadataToSvg(baseSvg, metadata) {
       element.setAttribute('data-name', surface.name || surface.id);
       if (Number.isFinite(surface.price)) element.setAttribute('data-price', String(surface.price));
       if (Number.isFinite(surface.income)) element.setAttribute('data-income', String(surface.income));
+      if (Array.isArray(surface.claimNeighborIds) && surface.claimNeighborIds.length) {
+        element.setAttribute('data-claim-neighbors', surface.claimNeighborIds.join(' '));
+      }
+      if (Array.isArray(surface.landNeighborIds) && surface.landNeighborIds.length) {
+        element.setAttribute('data-land-neighbors', surface.landNeighborIds.join(' '));
+      }
       element.classList.add('default-land');
     }
   }
